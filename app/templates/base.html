@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}East Bay Beer Tracker{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="wrap header-inner">
+      <a class="brand" href="/">🍺 East Bay Beer Tracker</a>
+      <nav>
+        <a href="/">Beers</a>
+        {% if user_email %}
+          <a href="/alerts">My Alerts</a>
+          {% if is_admin %}<a href="/admin" class="admin-link">Admin</a>{% endif %}
+          <form method="post" action="/logout" class="inline-form">
+            <button type="submit" class="link-button">Sign out ({{ user_email }})</button>
+          </form>
+        {% else %}
+          <a href="/login">Sign in</a>
+        {% endif %}
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    {% if msg %}<div class="flash flash-ok">{{ msg }}</div>{% endif %}
+    {% if error %}<div class="flash flash-error">{{ error }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="wrap site-footer">
+    <p>Beer lists refresh daily from brewery websites. Sign in with your email to get alerts when new beers drop.</p>
+  </footer>
+</body>
+</html>
