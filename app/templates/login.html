@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Sign in — East Bay Beer Tracker{% endblock %}
+{% block content %}
+<div class="card login-box">
+  {% if code_sent %}
+    <h1>Check your email</h1>
+    <p class="hint">We sent a 6-digit code to <strong>{{ email }}</strong>. Enter it below to sign in.</p>
+    <form method="post" action="/login/verify">
+      <input type="hidden" name="email" value="{{ email }}">
+      <input type="hidden" name="next" value="{{ next }}">
+      <input type="text" name="code" inputmode="numeric" pattern="[0-9]{6}" maxlength="6"
+             placeholder="123456" autofocus autocomplete="one-time-code" required>
+      <button type="submit">Sign in</button>
+    </form>
+    <p class="hint" style="margin-top:1rem;">Didn't get it?
+      <form method="post" action="/login/request" class="inline-form">
+        <input type="hidden" name="email" value="{{ email }}">
+        <input type="hidden" name="next" value="{{ next }}">
+        <button type="submit" class="link-button" style="color:var(--accent-dark);">Send a new code</button>
+      </form>
+    </p>
+  {% else %}
+    <h1>Sign in</h1>
+    <p class="hint">No password needed — we'll email you a one-time code.</p>
+    <form method="post" action="/login/request">
+      <input type="hidden" name="next" value="{{ next }}">
+      <input type="email" name="email" placeholder="you@example.com" autofocus required>
+      <button type="submit">Email me a code</button>
+    </form>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Beers on offer in the East Bay</h1>
+
+<form class="filter-bar" method="get" action="/">
+  <label>Search
+    <input type="text" name="q" value="{{ filters.q }}" placeholder="hazy, pilsner, coffee…">
+  </label>
+  <label>Brewery
+    <select name="brewery_id">
+      <option value="">All breweries</option>
+      {% for b in breweries %}
+        <option value="{{ b.id }}" {% if filters.brewery_id == b.id|string %}selected{% endif %}>{{ b.name }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Style
+    <select name="style">
+      <option value="">All styles</option>
+      {% for s in styles %}
+        <option value="{{ s }}" {% if filters.style == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>ABV min
+    <input type="number" name="abv_min" step="0.1" min="0" value="{{ filters.abv_min }}">
+  </label>
+  <label>ABV max
+    <input type="number" name="abv_max" step="0.1" min="0" value="{{ filters.abv_max }}">
+  </label>
+  <label>Availability
+    <input type="text" name="availability" value="{{ filters.availability }}" placeholder="on tap, cans…">
+  </label>
+  <label class="check">
+    <input type="checkbox" name="show_retired" value="1" {% if filters.show_retired %}checked{% endif %}>
+    include retired
+  </label>
+  <button type="submit">Filter</button>
+  <a class="button" style="background:transparent;color:var(--accent-dark);border:1px solid var(--accent);" href="/">Reset</a>
+</form>
+
+{% if beers %}
+  <p class="hint">{{ beers|length }} beer{{ '' if beers|length == 1 else 's' }} shown.</p>
+  <div class="beer-grid">
+    {% for beer in beers %}
+      <div class="beer-card">
+        <h3>{{ beer.name }}</h3>
+        <div class="beer-meta">
+          {{ beer.brewery.name }}{% if beer.brewery.location %} · {{ beer.brewery.location }}{% endif %}
+        </div>
+        <div>
+          {% if beer.style %}<span class="badge">{{ beer.style }}</span>{% endif %}
+          {% if beer.abv is not none %}<span class="badge">{{ beer.abv }}% ABV</span>{% endif %}
+          {% if beer.availability %}<span class="badge">{{ beer.availability }}</span>{% endif %}
+          {% if not beer.is_current %}<span class="badge retired">no longer listed</span>{% endif %}
+        </div>
+        {% if beer.description %}<p class="beer-desc">{{ beer.description }}</p>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="empty">
+    <p>No beers found{% if filters.q or filters.brewery_id or filters.style %} for those filters{% endif %}.</p>
+    <p class="hint">Beer lists fill in after the first scrape runs{% if is_admin %} — kick one off from the <a href="/admin">admin panel</a>{% endif %}.</p>
+  </div>
+{% endif %}
+{% endblock %}

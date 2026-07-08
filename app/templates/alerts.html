@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}My Alerts — East Bay Beer Tracker{% endblock %}
+{% block content %}
+<h1>My alerts</h1>
+<p class="hint">When the daily scrape finds a <strong>new</strong> beer matching an alert, we email you at {{ user_email }}. All filled-in conditions must match.</p>
+
+<div class="card">
+  <h2 style="margin-top:0;">Create an alert</h2>
+  <form method="post" action="/alerts/create">
+    <div class="form-grid">
+      <label>Alert name (optional)
+        <input type="text" name="name" placeholder="Fresh hazies">
+      </label>
+      <label>Keyword (name, style, or description)
+        <input type="text" name="keyword" placeholder="hazy">
+      </label>
+      <label>Brewery
+        <select name="brewery_id">
+          <option value="">Any brewery</option>
+          {% for b in breweries %}
+            <option value="{{ b.id }}">{{ b.name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>Style contains
+        <input type="text" name="style" placeholder="IPA">
+      </label>
+      <label>Min ABV
+        <input type="number" name="min_abv" step="0.1" min="0">
+      </label>
+      <label>Max ABV
+        <input type="number" name="max_abv" step="0.1" min="0">
+      </label>
+    </div>
+    <div class="form-actions">
+      <button type="submit">Create alert</button>
+    </div>
+  </form>
+</div>
+
+{% if alerts %}
+  <table>
+    <tr><th>Alert</th><th>Conditions</th><th>Status</th><th></th></tr>
+    {% for a in alerts %}
+      <tr>
+        <td>{{ a.name or 'Alert #' ~ a.id }}</td>
+        <td>
+          {% if a.keyword %}keyword “{{ a.keyword }}” · {% endif %}
+          {% if a.brewery %}{{ a.brewery.name }} · {% endif %}
+          {% if a.style %}style ~ “{{ a.style }}” · {% endif %}
+          {% if a.min_abv is not none %}ABV ≥ {{ a.min_abv }} · {% endif %}
+          {% if a.max_abv is not none %}ABV ≤ {{ a.max_abv }} · {% endif %}
+        </td>
+        <td>{% if a.is_active %}<span class="status-ok">active</span>{% else %}paused{% endif %}</td>
+        <td style="white-space:nowrap;">
+          <form method="post" action="/alerts/{{ a.id }}/toggle" class="inline-form">
+            <button type="submit" class="secondary">{{ 'Pause' if a.is_active else 'Resume' }}</button>
+          </form>
+          <form method="post" action="/alerts/{{ a.id }}/delete" class="inline-form"
+                onsubmit="return confirm('Delete this alert?');">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+  </table>
+{% else %}
+  <div class="empty">No alerts yet — create one above.</div>
+{% endif %}
+{% endblock %}

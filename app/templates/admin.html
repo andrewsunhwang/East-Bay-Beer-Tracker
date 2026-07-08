@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Admin — East Bay Beer Tracker{% endblock %}
+{% block content %}
+<h1>Admin</h1>
+
+<div class="card">
+  <form method="post" action="/admin/scrape-all" class="inline-form">
+    <button type="submit">Scrape all breweries now</button>
+  </form>
+  <span class="hint">Also runs automatically every day. Requires <code>ANTHROPIC_API_KEY</code> to be set on the server.</span>
+</div>
+
+<h2>Breweries &amp; source URLs</h2>
+<div class="card">
+  <h3 style="margin-top:0;">Add a brewery</h3>
+  <form method="post" action="/admin/breweries/create">
+    <div class="form-grid">
+      <label>Name
+        <input type="text" name="name" required placeholder="Fieldwork Brewing Company">
+      </label>
+      <label>Location
+        <input type="text" name="location" placeholder="Berkeley">
+      </label>
+      <label>Website
+        <input type="url" name="website" placeholder="https://…">
+      </label>
+      <label class="full">Scrape URLs (one per line — the pages listing current beers)
+        <textarea name="scrape_urls" rows="2" placeholder="https://example.com/on-tap"></textarea>
+      </label>
+    </div>
+    <div class="form-actions"><button type="submit">Add brewery</button></div>
+  </form>
+</div>
+
+{% for b in breweries %}
+  <details class="card brewery-block" {% if not b.scrape_urls %}open{% endif %}>
+    <summary>
+      {{ b.name }}
+      {% if not b.is_active %}<span class="badge retired">disabled</span>{% endif %}
+      <span class="hint">
+        — {{ b.beers|length }} beers ·
+        {% if b.last_scraped_at %}
+          last scrape: <span class="status-{{ 'ok' if b.last_scrape_status.startswith('ok') else 'error' }}">{{ b.last_scrape_status }}</span>
+        {% else %}never scraped{% endif %}
+      </span>
+    </summary>
+    <form method="post" action="/admin/breweries/{{ b.id }}/update">
+      <div class="form-grid">
+        <label>Name <input type="text" name="name" value="{{ b.name }}" required></label>
+        <label>Location <input type="text" name="location" value="{{ b.location }}"></label>
+        <label>Website <input type="url" name="website" value="{{ b.website }}"></label>
+        <label class="full">Scrape URLs (one per line)
+          <textarea name="scrape_urls" rows="2">{{ b.scrape_urls }}</textarea>
+        </label>
+        <label class="check" style="flex-direction:row;align-items:center;">
+          <input type="checkbox" name="is_active" value="1" {% if b.is_active %}checked{% endif %}>
+          include in daily scrape
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="submit">Save</button>
+      </div>
+    </form>
+    <div class="form-actions">
+      <form method="post" action="/admin/breweries/{{ b.id }}/scrape" class="inline-form">
+        <button type="submit" class="secondary">Scrape now</button>
+      </form>
+      <form method="post" action="/admin/breweries/{{ b.id }}/delete" class="inline-form"
+            onsubmit="return confirm('Delete {{ b.name }} and all of its beers?');">
+        <button type="submit" class="danger">Delete</button>
+      </form>
+    </div>
+  </details>
+{% endfor %}
+
+<h2>Recent scrape runs</h2>
+{% if logs %}
+  <table>
+    <tr><th>When (UTC)</th><th>Brewery</th><th>Status</th><th>Beers</th><th>New</th><th>Detail</th></tr>
+    {% for log in logs %}
+      <tr>
+        <td>{{ log.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td>{{ log.brewery.name if log.brewery else '—' }}</td>
+        <td class="status-{{ log.status }}">{{ log.status }}</td>
+        <td>{{ log.beers_found }}</td>
+        <td>{{ log.new_beers }}</td>
+        <td>{{ log.detail[:200] }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+{% else %}
+  <div class="empty">No scrapes yet.</div>
+{% endif %}
+{% endblock %}
