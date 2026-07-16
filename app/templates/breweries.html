@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Breweries — East Bay Beer Tracker{% endblock %}
+{% block content %}
+<h1>Breweries we track</h1>
+<p class="hint">Beer lists are refreshed from each brewery's website once a day.</p>
+
+{% if breweries %}
+  <table>
+    <tr><th>Brewery</th><th>Location</th><th>Beers on offer</th><th>Last checked</th></tr>
+    {% for b in breweries %}
+      <tr>
+        <td>
+          {% if b.website %}
+            <a href="{{ b.website }}" target="_blank" rel="noopener">{{ b.name }}</a>
+          {% else %}
+            {{ b.name }}
+          {% endif %}
+          {% if not b.is_active %}<span class="badge retired">paused</span>{% endif %}
+        </td>
+        <td>{{ b.location }}</td>
+        <td>
+          {% set count = current_counts.get(b.id, 0) %}
+          {% if count %}
+            <a href="/?brewery_id={{ b.id }}">{{ count }} beer{{ '' if count == 1 else 's' }}</a>
+          {% else %}
+            —
+          {% endif %}
+        </td>
+        <td>{{ b.last_scraped_at|timeago }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+{% else %}
+  <div class="empty">No breweries configured yet.</div>
+{% endif %}
+{% endblock %}
