@@ -133,9 +133,16 @@ Per active brewery, for each of its scrape URLs:
 
 1. **Fetch** (`httpx`, browser-like User-Agent, redirects followed, 30 s
    timeout).
-2. **Reduce to text**: BeautifulSoup strips `script`/`style`/`svg`/etc.,
-   collapses whitespace, caps at `SCRAPE_TEXT_LIMIT` (80k chars). Sending
-   text instead of raw HTML keeps token costs low and removes markup noise.
+2. **Reduce to text**: BeautifulSoup collapses the page to readable text
+   (scripts/styles/svg stripped, whitespace collapsed, capped at
+   `SCRAPE_TEXT_LIMIT` = 80k chars). **Before** stripping scripts, it also
+   harvests any beer data embedded as JSON in `<script>` tags — JSON-LD,
+   Next.js `__NEXT_DATA__`, and other `application/json` blobs — flattens it
+   to its text leaves (dropping URLs/IDs/CSS noise), and appends that to the
+   text. This recovers menus from JS-driven sites (Next.js, Shopify, etc.)
+   that embed their data in the initial HTML even though the visible body is
+   an empty shell. Sending text (plus recovered JSON) instead of raw HTML
+   keeps token costs low.
 3. **Cache check**: the extracted text is SHA-256 hashed and compared to the
    `SourcePage` row for that (brewery, URL). If the hash is unchanged since
    the last successful parse, the stored beer list is **reused and the LLM
@@ -215,9 +222,16 @@ noted as a limitation below.
 
 ## Known limitations
 
-- **JS-only menus**: pages that render their beer list purely client-side
-  yield no text; the scraper detects this and reports it rather than parsing
-  an empty page. Choose a different URL for that brewery.
+- **JS-only menus**: the scraper recovers beer data embedded as JSON in the
+  page's `<script>` tags (JSON-LD, `__NEXT_DATA__`, etc.), which covers most
+  Next.js/Shopify-style sites whose visible body is an empty shell. Menus
+  that fetch their data over a *separate* network request after page load
+  (nothing in the initial HTML) still yield nothing — the scraper reports
+  this rather than parsing an empty page. For those, point the brewery at a
+  different URL whose HTML contains the list (a print/embed menu, a Shopify
+  `/collections/…` page, or the menu platform's own page). Also avoid URL
+  fragments like `…/#on-tap` — the `#…` part never reaches the server, so
+  only the base page is fetched.
 - **Bot-blocking sites**: some brewery sites sit behind CDN bot protection
   that returns HTTP 403 to non-browser clients. The scraper sends
   browser-like headers, which satisfies most of these, but sites running a
