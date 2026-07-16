@@ -30,6 +30,11 @@ CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
 # Max characters of page text sent to the LLM per source URL.
 SCRAPE_TEXT_LIMIT = int(os.environ.get("SCRAPE_TEXT_LIMIT", "80000"))
 
+# Headless-browser (Playwright) fallback for JavaScript-rendered menus.
+# Used only when a plain fetch yields no beers. Requires the playwright
+# package + Chromium (see Dockerfile). Set JS_RENDER=0 to disable.
+JS_RENDER = os.environ.get("JS_RENDER", "1") not in ("0", "false", "no")
+
 # SMTP settings. If SMTP_HOST is unset, emails are printed to the server log
 # (dev mode) instead of being sent.
 SMTP_HOST = os.environ.get("SMTP_HOST", "")

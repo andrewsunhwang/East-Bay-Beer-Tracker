@@ -33,6 +33,8 @@ Everything is environment variables (see [.env.example](../.env.example)):
 | `SMTP_STARTTLS` | no | `1` | Set `0` to disable STARTTLS |
 | `SCRAPE_HOUR` | no | `4` | Hour (0–23, server local time) of the daily scrape |
 | `CLAUDE_MODEL` | no | `claude-sonnet-5` | Parsing model — see cost notes below |
+| `JS_RENDER` | no | `1` | Headless-Chromium fallback for JavaScript-rendered menus (needs Playwright + Chromium, included in the Dockerfile). Set `0` to disable |
+| `CHROMIUM_PATH` | no | unset | Path to a system Chromium binary, if not using Playwright's downloaded build |
 | `SECRET_KEY` | no | auto-generated | Session signing key; auto-persisted to `data/.secret_key` if unset. Rotating it signs everyone out |
 | `DATA_DIR` / `DB_PATH` | no | `./data` | Where the DB and secret key live |
 | `SCRAPE_TEXT_LIMIT` | no | `80000` | Max page characters sent to the LLM |
@@ -110,32 +112,32 @@ Point your domain's DNS at the server, `sudo systemctl reload caddy`, done.
 
 ## Option 2 — Docker / Fly.io / Railway
 
-A minimal Dockerfile:
-
-```dockerfile
-FROM python:3.12-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-ENV DATA_DIR=/data
-VOLUME /data
-EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
+The repo ships a [Dockerfile](../Dockerfile) that installs the app **plus
+Playwright and headless Chromium** — the browser is what lets the scraper
+handle JavaScript-rendered menus (Fieldwork, Ghost Town, and most modern
+brewery sites). Expect a ~1 GB image and a slower first build; that's the
+Chromium payload and it's worth it.
 
 Platform notes:
 
+- **Railway**: with the Dockerfile in the repo root, Railway automatically
+  builds with it instead of Nixpacks — a custom start command is no longer
+  needed (the image binds to Railway's `$PORT` on its own). Attach a volume,
+  mount it at `/data` (the image already sets `DATA_DIR=/data`); env vars in
+  the service settings.
 - **Fly.io**: create a volume (`fly volumes create data --size 1`) and mount
   it at `/data`; set secrets with `fly secrets set ANTHROPIC_API_KEY=...`.
   Keep `min_machines_running = 1` and `auto_stop_machines = false` — if the
   machine sleeps, the daily scrape won't run.
-- **Railway**: attach a volume, set its mount path, and point `DATA_DIR` at
-  it; env vars in the service settings.
 - **Render**: persistent disks require a paid instance type; mount at `/data`
   and set `DATA_DIR=/data`.
 
 In all cases: one instance, volume mounted, `DATA_DIR` pointing at it.
+
+Running without the Dockerfile (e.g. bare `pip install` on a VPS)? The app
+works fine, but JS-rendered menus scrape empty unless you also run
+`playwright install --with-deps chromium` (or set `CHROMIUM_PATH` to a
+system Chromium). The scrape log tells you when a brewery needs it.
 
 ## Option 3 — Home server / Raspberry Pi
 

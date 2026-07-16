@@ -134,6 +134,9 @@ class SourcePage(Base):
     url: Mapped[str] = mapped_column(String(500))
     content_hash: Mapped[str] = mapped_column(String(64), default="")
     parsed_json: Mapped[str] = mapped_column(Text, default="")
+    # True once this URL was found to need headless-browser rendering; future
+    # scrapes then go straight to the rendered fetch.
+    needs_render: Mapped[bool] = mapped_column(Boolean, default=False)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -172,6 +175,10 @@ def _migrate_schema() -> None:
         if "style_family" not in cols:
             conn.exec_driver_sql("ALTER TABLE beers ADD COLUMN style_family VARCHAR(50) NOT NULL DEFAULT ''")
             conn.commit()
+        cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(source_pages)")]
+        if cols and "needs_render" not in cols:
+            conn.exec_driver_sql("ALTER TABLE source_pages ADD COLUMN needs_render BOOLEAN NOT NULL DEFAULT 0")
+            conn.commit()
 
 
 def _backfill_style_families() -> None:
@@ -188,9 +195,9 @@ def _backfill_style_families() -> None:
 
 
 SEED_BREWERIES = [
-    ("Fieldwork Brewing Company", "Berkeley", "https://fieldworkbrewing.com", "https://fieldworkbrewing.com/menus/"),
+    ("Fieldwork Brewing Company", "Berkeley", "https://fieldworkbrewing.com", "https://fieldworkbrewing.com/beer/?location=berkeley"),
     ("Temescal Brewing", "Oakland", "https://www.temescalbrewing.com", "https://www.temescalbrewing.com/whats-pouring"),
-    ("Ghost Town Brewing", "Oakland", "https://ghosttownbrewing.com", "https://ghosttownbrewing.com/collections/beer"),
+    ("Ghost Town Brewing", "Oakland", "https://www.ghosttownbrewing.com", "https://www.ghosttownbrewing.com/"),
     ("Original Pattern Brewing", "Oakland", "https://www.originalpattern.com", "https://www.originalpattern.com/beer"),
     ("Drake's Brewing Company", "San Leandro", "https://drinkdrakes.com", "https://drinkdrakes.com/beers/"),
     ("East Brother Beer Co.", "Richmond", "https://eastbrotherbeer.com", "https://eastbrotherbeer.com/beer/"),
