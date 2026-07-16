@@ -7,6 +7,8 @@ A website that tracks the beers currently offered by East Bay breweries.
 - **Passwordless email sign-in**: users enter their email and receive a 6-digit one-time code (no passwords). Signed-in users manage **alerts** at `/alerts` — keyword / brewery / style / ABV-range conditions. When a scrape finds a *new* matching beer, they get an email.
 - **Admin panel** at `/admin`, restricted to `ADMIN_EMAIL` (default `andrewsunhwang@gmail.com`) via the same email-code sign-in: add/edit/delete breweries, manage their scrape URLs, trigger scrapes, and view scrape logs.
 
+**Docs:** [Architecture & design](docs/ARCHITECTURE.md) · [Deployment guide](docs/DEPLOYMENT.md)
+
 ## Running
 
 ```bash
