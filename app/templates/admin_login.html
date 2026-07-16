@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Admin sign-in — East Bay Beer Tracker{% endblock %}
+{% block content %}
+<div class="card login-box">
+  <h1>Admin sign-in</h1>
+  <p class="hint">Enter the admin password to manage breweries and scrapes.</p>
+  <form method="post" action="/admin/login">
+    <input type="password" name="password" placeholder="Admin password" autofocus
+           autocomplete="current-password" required>
+    <button type="submit">Sign in</button>
+  </form>
+  <p class="hint" style="margin-top:1rem;">
+    Not the admin? <a href="/login">Sign in with your email</a> instead.
+  </p>
+</div>
+{% endblock %}

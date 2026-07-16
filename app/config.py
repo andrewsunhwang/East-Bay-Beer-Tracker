@@ -11,6 +11,11 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 # The single admin account. Only this email sees/uses the admin panel.
 ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "andrewsunhwang@gmail.com").strip().lower()
 
+# Optional admin password. When set, the admin can sign in with this password
+# at /admin/login (no email code needed — useful when SMTP is unavailable).
+# Set this in your host's environment, never in the repo.
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+
 DB_PATH = os.environ.get("DB_PATH", str(DATA_DIR / "beer_tracker.db"))
 
 # Base URL used in emails to link back to the site.

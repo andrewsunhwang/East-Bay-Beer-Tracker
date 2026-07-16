@@ -102,3 +102,14 @@ def read_session_email(request: Request) -> str | None:
 
 def is_admin(email: str | None) -> bool:
     return email is not None and email == config.ADMIN_EMAIL
+
+
+def admin_password_enabled() -> bool:
+    return bool(config.ADMIN_PASSWORD)
+
+
+def verify_admin_password(password: str) -> bool:
+    """Constant-time check against the ADMIN_PASSWORD env var."""
+    if not config.ADMIN_PASSWORD:
+        return False
+    return hmac.compare_digest(password, config.ADMIN_PASSWORD)

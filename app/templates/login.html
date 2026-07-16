@@ -27,6 +27,11 @@
       <input type="email" name="email" placeholder="you@example.com" autofocus required>
       <button type="submit">Email me a code</button>
     </form>
+    {% if admin_password_enabled %}
+      <p class="hint" style="margin-top:1rem;">
+        Site admin? <a href="/admin/login">Sign in with the admin password</a>.
+      </p>
+    {% endif %}
   {% endif %}
 </div>
 {% endblock %}

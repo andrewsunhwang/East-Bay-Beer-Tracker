@@ -27,6 +27,7 @@ Everything is environment variables (see [.env.example](../.env.example)):
 |---|---|---|---|
 | `ANTHROPIC_API_KEY` | for scraping | — | Claude API key used to parse brewery pages |
 | `ADMIN_EMAIL` | no | `andrewsunhwang@gmail.com` | The only account that gets the admin panel |
+| `ADMIN_PASSWORD` | no | unset | Lets the admin sign in at `/admin/login` with a password instead of an emailed code. Set only as a host secret — never in the repo. Leave unset to disable |
 | `BASE_URL` | production | `http://localhost:8000` | Public URL, used in alert-email links |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | production | unset | Outbound email. **Unset `SMTP_HOST` = dev mode: emails (including sign-in codes) are printed to the server log**, so real SMTP is effectively required in production |
 | `SMTP_STARTTLS` | no | `1` | Set `0` to disable STARTTLS |

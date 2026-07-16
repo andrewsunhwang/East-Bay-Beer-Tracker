@@ -97,9 +97,19 @@ Passwordless by construction — there are no password fields anywhere.
 
 **Admin** is not a role stored in the database: a session is admin if and only
 if its email equals `ADMIN_EMAIL` (default `andrewsunhwang@gmail.com`). The
-admin therefore signs in through the exact same email-code flow; there is no
+admin normally signs in through the exact same email-code flow; there is no
 separate admin credential to leak. All `/admin` routes re-check this on every
 request, and the Admin nav link renders only for that session.
+
+Optionally, setting `ADMIN_PASSWORD` (a host/deploy-platform secret — never
+committed to the repo) enables a second entry point, `/admin/login`, where the
+admin can sign in with that password instead of an emailed code. This exists
+purely as a fallback for when outbound email isn't configured or working; the
+comparison is constant-time (`hmac.compare_digest`) and a successful password
+login sets exactly the same signed session cookie as the email flow — from
+the app's perspective there's no distinction afterward. Leaving
+`ADMIN_PASSWORD` unset disables this path entirely and `/admin/login`
+redirects back to the normal email sign-in.
 
 The signing secret comes from `SECRET_KEY` if set, otherwise it's generated
 once and persisted to `data/.secret_key` so sessions survive restarts.
