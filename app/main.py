@@ -69,6 +69,7 @@ def base_context(request: Request) -> dict:
         "request": request,
         "user_email": email,
         "is_admin": auth.is_admin(email),
+        "admin_password_enabled": auth.admin_password_enabled(),
         "msg": request.query_params.get("msg", ""),
         "error": request.query_params.get("error", ""),
     }
@@ -161,7 +162,15 @@ def login_request(
     email = auth.normalize_email(email)
     if not auth.valid_email(email):
         return redirect("/login", error="Please enter a valid email address.")
-    auth.request_login_code(db, email)
+    try:
+        auth.request_login_code(db, email)
+    except Exception:
+        logger.exception("Failed to send sign-in code to %s", email)
+        return redirect(
+            "/login",
+            error="We couldn't send the sign-in code — the email service may be "
+            "misconfigured. Please try again later or contact the site admin.",
+        )
     ctx = base_context(request)
     ctx.update(email=email, next=next, code_sent=True)
     return templates.TemplateResponse(request, "login.html", ctx)
@@ -196,6 +205,33 @@ def login_verify(
 def logout():
     resp = redirect("/", msg="Signed out.")
     resp.delete_cookie(auth.SESSION_COOKIE)
+    return resp
+
+
+@app.get("/admin/login", response_class=HTMLResponse)
+def admin_login_page(request: Request):
+    if not auth.admin_password_enabled():
+        return redirect("/login", error="Admin password login is not enabled on this server.")
+    return templates.TemplateResponse(request, "admin_login.html", base_context(request))
+
+
+@app.post("/admin/login")
+def admin_login(
+    request: Request,
+    db: Session = Depends(get_db),
+    password: str = Form(...),
+):
+    if not auth.admin_password_enabled() or not auth.verify_admin_password(password):
+        return redirect("/admin/login", error="Incorrect admin password.")
+    auth.get_or_create_user(db, config.ADMIN_EMAIL)
+    resp = redirect("/admin", msg="Signed in as admin.")
+    resp.set_cookie(
+        auth.SESSION_COOKIE,
+        auth.make_session_token(config.ADMIN_EMAIL),
+        max_age=config.SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+    )
     return resp
 
 
@@ -299,7 +335,8 @@ def require_admin(request: Request):
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request, db: Session = Depends(get_db)):
     if not require_admin(request):
-        return redirect("/login?next=/admin", error="Admin sign-in required.")
+        target = "/admin/login" if auth.admin_password_enabled() else "/login?next=/admin"
+        return redirect(target, error="Admin sign-in required.")
     breweries = db.query(Brewery).order_by(Brewery.name).all()
     logs = (
         db.query(ScrapeLog)
