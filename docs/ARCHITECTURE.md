@@ -198,7 +198,14 @@ noted as a limitation below.
 ## Known limitations
 
 - **JS-only menus**: pages that render their beer list purely client-side
-  yield no text; choose a different URL for that brewery.
+  yield no text; the scraper detects this and reports it rather than parsing
+  an empty page. Choose a different URL for that brewery.
+- **Bot-blocking sites**: some brewery sites sit behind CDN bot protection
+  that returns HTTP 403 to non-browser clients. The scraper sends
+  browser-like headers, which satisfies most of these, but sites running a
+  full JavaScript challenge (e.g. strict Cloudflare) can't be scraped
+  directly — use a different page on the site (embed/print menu URLs are
+  often unprotected).
 - **Name-based identity**: a brewery renaming a beer looks like one retirement
   plus one new beer (which may fire alerts).
 - **No CSRF tokens**: mitigated by `SameSite=Lax`; add tokens if the threat
