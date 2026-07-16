@@ -143,11 +143,19 @@ Per active brewery, for each of its scrape URLs:
    that embed their data in the initial HTML even though the visible body is
    an empty shell. Sending text (plus recovered JSON) instead of raw HTML
    keeps token costs low.
-3. **Cache check**: the extracted text is SHA-256 hashed and compared to the
-   `SourcePage` row for that (brewery, URL). If the hash is unchanged since
-   the last successful parse, the stored beer list is **reused and the LLM
-   call is skipped entirely** — the common case, since most brewery pages
-   don't change day to day. Only changed pages advance to step 4.
+3. **Cache check**: the extracted text is SHA-256 hashed (salted with an
+   `EXTRACTION_VERSION` number, so improving the extraction code invalidates
+   stale parses) and compared to the `SourcePage` row for that (brewery,
+   URL). If the hash is unchanged since the last successful **non-empty**
+   parse, the stored beer list is **reused and the LLM call is skipped
+   entirely** — the common case, since most brewery pages don't change day
+   to day. Cached *empty* parses are never reused, so a URL that once
+   yielded nothing keeps being retried. Only changed pages advance to step 4.
+   *JS-render fallback:* if a plain fetch yields almost no text, or parses
+   to zero beers, the page is re-fetched in headless Chromium (Playwright)
+   so its JavaScript runs, and the rendered DOM is parsed instead. URLs that
+   needed rendering are flagged (`needs_render`) and go straight to the
+   rendered fetch on future scrapes.
 4. **LLM extraction** (skipped on a cache hit): one call to Claude
    (`CLAUDE_MODEL`, default `claude-sonnet-5`) using the SDK's
    `messages.parse` with a Pydantic schema (`ParsedBeerList`), so the
@@ -222,16 +230,16 @@ noted as a limitation below.
 
 ## Known limitations
 
-- **JS-only menus**: the scraper recovers beer data embedded as JSON in the
-  page's `<script>` tags (JSON-LD, `__NEXT_DATA__`, etc.), which covers most
-  Next.js/Shopify-style sites whose visible body is an empty shell. Menus
-  that fetch their data over a *separate* network request after page load
-  (nothing in the initial HTML) still yield nothing — the scraper reports
-  this rather than parsing an empty page. For those, point the brewery at a
-  different URL whose HTML contains the list (a print/embed menu, a Shopify
-  `/collections/…` page, or the menu platform's own page). Also avoid URL
-  fragments like `…/#on-tap` — the `#…` part never reaches the server, so
-  only the base page is fetched.
+- **JS-only menus**: handled in two tiers. First, beer data embedded as JSON
+  in the page's `<script>` tags (JSON-LD, `__NEXT_DATA__`, etc.) is
+  recovered without a browser. If that still yields nothing — menus fetched
+  over a *separate* network request after page load — the page is re-fetched
+  in headless Chromium so its JavaScript actually runs (requires Playwright
+  + Chromium, included in the Dockerfile; controlled by `JS_RENDER`). A
+  0-beer result is always surfaced as a `warning` with a hint, never a
+  silent "ok". Note that URL fragments like `…/#on-tap` never reach the
+  server (the base page is fetched), which is fine when the menu lives on
+  that page.
 - **Bot-blocking sites**: some brewery sites sit behind CDN bot protection
   that returns HTTP 403 to non-browser clients. The scraper sends
   browser-like headers, which satisfies most of these, but sites running a

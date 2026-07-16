@@ -51,6 +51,69 @@ class PageTextEmpty(Exception):
     """The page fetched fine but contained almost no readable text."""
 
 
+# Bump when text-extraction logic changes: it salts the cache hash, so cached
+# parses made by older extraction code are invalidated and re-parsed even if
+# the page bytes themselves haven't changed.
+EXTRACTION_VERSION = 3
+
+
+def _content_hash(text: str) -> str:
+    return hashlib.sha256(f"v{EXTRACTION_VERSION}:{text}".encode("utf-8")).hexdigest()
+
+
+_renderer_ok: bool | None = None
+
+
+def renderer_available() -> bool:
+    """Playwright + Chromium fallback available on this server?"""
+    global _renderer_ok
+    if not config.JS_RENDER:
+        return False
+    if _renderer_ok is None:
+        try:
+            import playwright.sync_api  # noqa: F401
+
+            _renderer_ok = True
+        except ImportError:
+            _renderer_ok = False
+            logger.warning(
+                "playwright is not installed — JavaScript-rendered menus can't be scraped. "
+                "Deploy with the provided Dockerfile (or `pip install playwright && playwright "
+                "install --with-deps chromium`) to enable."
+            )
+    return _renderer_ok
+
+
+def fetch_page_text_rendered(url: str) -> str:
+    """Fetch a URL in headless Chromium so client-side JavaScript runs, then
+    reduce the rendered DOM to text. Used for menus that load via XHR."""
+    import os
+
+    from playwright.sync_api import sync_playwright
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            # CHROMIUM_PATH lets deployments point at a system-installed
+            # Chromium instead of Playwright's downloaded build.
+            executable_path=os.environ.get("CHROMIUM_PATH") or None,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        try:
+            page = browser.new_page(
+                user_agent=BROWSER_HEADERS["User-Agent"],
+                viewport={"width": 1366, "height": 900},
+            )
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=15000)
+            except Exception:
+                pass  # slow trackers etc. — proceed with whatever has rendered
+            html = page.content()
+        finally:
+            browser.close()
+    return html_to_text(html)
+
+
 def friendly_error(exc: Exception) -> str:
     """Turn an exception from the fetch/parse pipeline into a message an
     admin can act on."""
@@ -88,6 +151,8 @@ def friendly_error(exc: Exception) -> str:
         return f"Claude API error while parsing the page ({exc.status_code})"
     if isinstance(exc, anthropic.APIConnectionError):
         return "couldn't reach the Claude API (network error from the server)"
+    if "playwright" in type(exc).__module__:
+        return f"browser rendering failed ({type(exc).__name__}) — will retry next run"
     if "api_key" in str(exc).lower():
         return "Claude API key is missing — set ANTHROPIC_API_KEY on the server"
     return f"unexpected error: {type(exc).__name__}: {exc}"
@@ -264,26 +329,54 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
     cached_hits = 0
     for url in urls:
         try:
-            text = fetch_page_text(url)
-            if len(text.strip()) < 200:
-                raise PageTextEmpty(url)
-            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
             page = pages.get(url)
+            # URLs known to need JS rendering skip the plain fetch entirely.
+            rendered = bool(page is not None and page.needs_render and renderer_available())
+            text = fetch_page_text_rendered(url) if rendered else fetch_page_text(url)
 
-            if page is not None and page.content_hash == content_hash and page.parsed_json:
-                # Page byte-identical to last successful parse — reuse it, no API call.
+            if len(text.strip()) < 200:
+                # Nearly-empty shell: render it before giving up.
+                if not rendered and renderer_available():
+                    text = fetch_page_text_rendered(url)
+                    rendered = True
+                if len(text.strip()) < 200:
+                    raise PageTextEmpty(url)
+
+            content_hash = _content_hash(text)
+            # Reuse only non-empty cached parses: a cached 0-beer result is
+            # retried every run (so a fixed URL or newly-installed renderer
+            # can recover) rather than being trusted forever.
+            if (
+                page is not None
+                and page.content_hash == content_hash
+                and page.parsed_json not in ("", "[]")
+            ):
+                # Page identical to last successful parse — reuse it, no API call.
                 beers = [ParsedBeer(**d) for d in json.loads(page.parsed_json)]
                 page.fetched_at = utcnow()
                 cached_hits += 1
             else:
                 beers = parse_beers_with_llm(brewery.name, url, text)
                 llm_calls += 1
+                if not beers and not rendered and renderer_available():
+                    # Plain fetch parsed to nothing — likely a JS-rendered menu.
+                    # Render the page and try once more.
+                    rendered_text = fetch_page_text_rendered(url)
+                    if len(rendered_text.strip()) >= 200 and rendered_text != text:
+                        rendered_beers = parse_beers_with_llm(brewery.name, url, rendered_text)
+                        llm_calls += 1
+                        if rendered_beers:
+                            beers = rendered_beers
+                            text = rendered_text
+                            content_hash = _content_hash(rendered_text)
+                            rendered = True
                 if page is None:
                     page = SourcePage(brewery_id=brewery.id, url=url)
                     db.add(page)
                     pages[url] = page
                 page.content_hash = content_hash
                 page.parsed_json = json.dumps([b.model_dump() for b in beers])
+                page.needs_render = rendered
                 page.fetched_at = utcnow()
                 page.parsed_at = utcnow()
 
@@ -325,14 +418,24 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
     existing_by_key = {_norm_name(b.name): b for b in existing_beers}
 
     # Safety guard: a page that loads but yields zero beers (redesign, outage
-    # page, JS-rendered menu) must not silently retire the whole list.
-    if not parsed and any(b.is_current for b in existing_beers):
+    # page, JS-rendered menu) must never silently retire the whole list — and
+    # a 0-beer result is always surfaced as a warning, never a quiet "ok".
+    if not parsed:
         log.status = "warning"
-        log.detail = (
-            "No beers found on the page — kept the existing list untouched. "
-            "If this persists, the menu may have moved or be JavaScript-rendered; "
-            "check the scrape URL."
-        )
+        if renderer_available():
+            hint = (
+                "No beers found even after JavaScript rendering — the URL may not "
+                "be the menu page; check it in a browser and update it."
+            )
+        else:
+            hint = (
+                "No beers found. The menu is likely JavaScript-rendered and this "
+                "server has no browser fallback installed (deploy with the "
+                "provided Dockerfile to enable JS rendering)."
+            )
+        if any(b.is_current for b in existing_beers):
+            hint += " Kept the existing beer list untouched."
+        log.detail = hint
         _finish(db, brewery, log)
         return log
     now = utcnow()

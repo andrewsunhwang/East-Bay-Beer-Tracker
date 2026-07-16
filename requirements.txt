@@ -8,3 +8,5 @@ anthropic>=0.116
 itsdangerous>=2.2
 python-multipart>=0.0.9
 pydantic>=2.7
+playwright>=1.45
+
