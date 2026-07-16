@@ -117,6 +117,87 @@ class ParsedBeerList(BaseModel):
     beers: list[ParsedBeer] = Field(description="Every beer currently listed on the page")
 
 
+def _looks_noisy(s: str) -> bool:
+    """Filter out JSON string values that are clearly not beer content:
+    URLs, file paths, IDs/hashes, CSS, base64."""
+    if s.startswith(("http://", "https://", "/", "#", "data:", "{", "<")):
+        return True
+    if " " not in s and ("/" in s or "." in s and len(s) > 20):  # paths, filenames
+        return True
+    if len(s) > 40 and " " not in s:  # long token with no spaces → hash/id/css
+        return True
+    return False
+
+
+def _flatten_json_values(obj, out: list[str], seen: set[str], budget: list[int]) -> None:
+    """Recursively collect human-readable leaf strings/numbers from parsed JSON.
+
+    Modern sites (Next.js, Shopify, etc.) embed the beer list as JSON in a
+    <script> tag. Flattening that JSON to its text leaves recovers the beer
+    names, styles, ABVs, and descriptions while dropping structural noise."""
+    if budget[0] <= 0:
+        return
+    if isinstance(obj, dict):
+        for value in obj.values():
+            _flatten_json_values(value, out, seen, budget)
+    elif isinstance(obj, list):
+        for value in obj:
+            _flatten_json_values(value, out, seen, budget)
+    elif isinstance(obj, str):
+        s = obj.strip()
+        if 1 <= len(s) <= 300 and s not in seen and not _looks_noisy(s):
+            seen.add(s)
+            out.append(s)
+            budget[0] -= len(s) + 1
+    elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
+        s = str(obj)
+        if s not in seen:
+            seen.add(s)
+            out.append(s)
+            budget[0] -= len(s) + 1
+
+
+def _extract_structured_data(soup: BeautifulSoup, budget: int = 40000) -> str:
+    """Pull beer data out of embedded JSON (<script> blobs) that plain text
+    extraction would miss. Returns newline-joined text leaves."""
+    scripts = (
+        soup.find_all("script", attrs={"type": "application/ld+json"})
+        + soup.find_all("script", id="__NEXT_DATA__")
+        + soup.find_all("script", attrs={"type": "application/json"})
+    )
+    out: list[str] = []
+    seen: set[str] = set()
+    remaining = [budget]
+    for script in scripts:
+        raw = script.string or script.get_text()
+        if not raw or not raw.strip():
+            continue
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            continue
+        _flatten_json_values(data, out, seen, remaining)
+        if remaining[0] <= 0:
+            break
+    return "\n".join(out)
+
+
+def html_to_text(html: str) -> str:
+    """Reduce an HTML page to readable text for the LLM, including any beer
+    data embedded as JSON in <script> tags (which JS-rendered menus rely on)."""
+    soup = BeautifulSoup(html, "html.parser")
+    # Capture embedded JSON *before* stripping scripts.
+    structured = _extract_structured_data(soup)
+    for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
+        tag.decompose()
+    text = soup.get_text(separator="\n")
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = "\n".join(line.strip() for line in text.splitlines())
+    if structured:
+        text = f"{text}\n\n--- structured data embedded in the page ---\n{structured}"
+    return text[: config.SCRAPE_TEXT_LIMIT]
+
+
 def fetch_page_text(url: str) -> str:
     """Fetch a URL and reduce it to readable text for the LLM."""
     with httpx.Client(
@@ -126,13 +207,7 @@ def fetch_page_text(url: str) -> str:
     ) as client:
         resp = client.get(url)
         resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
-    for tag in soup(["script", "style", "noscript", "svg", "iframe"]):
-        tag.decompose()
-    text = soup.get_text(separator="\n")
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = "\n".join(line.strip() for line in text.splitlines())
-    return text[: config.SCRAPE_TEXT_LIMIT]
+    return html_to_text(resp.text)
 
 
 def parse_beers_with_llm(brewery_name: str, url: str, page_text: str) -> list[ParsedBeer]:
