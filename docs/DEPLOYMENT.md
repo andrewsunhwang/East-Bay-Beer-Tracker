@@ -32,7 +32,7 @@ Everything is environment variables (see [.env.example](../.env.example)):
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` / `SMTP_FROM` | production | unset | Outbound email. **Unset `SMTP_HOST` = dev mode: emails (including sign-in codes) are printed to the server log**, so real SMTP is effectively required in production |
 | `SMTP_STARTTLS` | no | `1` | Set `0` to disable STARTTLS |
 | `SCRAPE_HOUR` | no | `4` | Hour (0–23, server local time) of the daily scrape |
-| `CLAUDE_MODEL` | no | `claude-opus-4-8` | Parsing model — see cost notes below |
+| `CLAUDE_MODEL` | no | `claude-sonnet-5` | Parsing model — see cost notes below |
 | `SECRET_KEY` | no | auto-generated | Session signing key; auto-persisted to `data/.secret_key` if unset. Rotating it signs everyone out |
 | `DATA_DIR` / `DB_PATH` | no | `./data` | Where the DB and secret key live |
 | `SCRAPE_TEXT_LIMIT` | no | `80000` | Max page characters sent to the LLM |
@@ -166,11 +166,13 @@ hostname.
 - **Monitoring**: the admin page shows per-brewery last-scrape status and the
   30 most recent scrape-log rows. `error`/`partial` statuses with detail
   strings are your first stop; the systemd journal has full tracebacks.
-- **Scrape cost**: each brewery page is one Claude call per day. With the
-  default `claude-opus-4-8` and typical menu pages, expect very roughly
-  $0.50–1.50/day for 8 breweries. Setting `CLAUDE_MODEL=claude-sonnet-5`
-  cuts that ~60% and remains well within this task's difficulty; extraction
-  quality is the thing to spot-check after switching.
+- **Scrape cost**: a brewery page costs one Claude call **only when its text
+  has changed** since the last scrape — unchanged pages are served from the
+  `SourcePage` cache with no API call (the admin log notes this). The default
+  model is `claude-sonnet-5`; on the days a page actually changes, expect a
+  few cents per brewery. In steady state, most daily scrapes make zero API
+  calls. `CLAUDE_MODEL` can be set to `claude-opus-4-8` if you want to
+  spot-check extraction quality on a tricky menu.
 - **Logs**: standard Python logging to stdout/journal. In dev mode (no
   SMTP_HOST) every "sent" email is logged in full — don't run production
   that way, since sign-in codes would sit in the logs.

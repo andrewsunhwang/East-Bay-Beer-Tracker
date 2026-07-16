@@ -3,6 +3,8 @@ upsert into the database, and email users whose alerts match new beers."""
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import re
 from typing import Optional
@@ -22,6 +24,7 @@ from .db import (
     Brewery,
     ScrapeLog,
     SessionLocal,
+    SourcePage,
     utcnow,
 )
 
@@ -139,6 +142,7 @@ def parse_beers_with_llm(brewery_name: str, url: str, page_text: str) -> list[Pa
         model=config.CLAUDE_MODEL,
         max_tokens=16000,
         system=(
+            # Kept stable to maximize prompt-cache reuse across breweries.
             "You extract structured beer lists from the text of brewery web pages. "
             "Include only beers (and brewery-made ciders/seltzers/hard kombucha, noting that in style). "
             "Assign each beer's style_family from the allowed values based on its style. "
@@ -178,14 +182,37 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
         _finish(db, brewery, log)
         return log
 
+    pages = {p.url: p for p in db.query(SourcePage).filter(SourcePage.brewery_id == brewery.id)}
     parsed: dict[str, ParsedBeer] = {}
     errors: list[str] = []
+    llm_calls = 0
+    cached_hits = 0
     for url in urls:
         try:
             text = fetch_page_text(url)
             if len(text.strip()) < 200:
                 raise PageTextEmpty(url)
-            for beer in parse_beers_with_llm(brewery.name, url, text):
+            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            page = pages.get(url)
+
+            if page is not None and page.content_hash == content_hash and page.parsed_json:
+                # Page byte-identical to last successful parse — reuse it, no API call.
+                beers = [ParsedBeer(**d) for d in json.loads(page.parsed_json)]
+                page.fetched_at = utcnow()
+                cached_hits += 1
+            else:
+                beers = parse_beers_with_llm(brewery.name, url, text)
+                llm_calls += 1
+                if page is None:
+                    page = SourcePage(brewery_id=brewery.id, url=url)
+                    db.add(page)
+                    pages[url] = page
+                page.content_hash = content_hash
+                page.parsed_json = json.dumps([b.model_dump() for b in beers])
+                page.fetched_at = utcnow()
+                page.parsed_at = utcnow()
+
+            for beer in beers:
                 key = _norm_name(beer.name)
                 if not key:
                     continue
@@ -207,6 +234,11 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
         except Exception as exc:  # network, parse, or API failure for this URL
             logger.exception("Scrape failed for %s (%s)", brewery.name, url)
             errors.append(f"{url}: {friendly_error(exc)}")
+
+    # Drop cache rows for URLs no longer configured on this brewery.
+    for stale_url, page in list(pages.items()):
+        if stale_url not in urls:
+            db.delete(page)
 
     if errors and not parsed:
         log.status = "error"
@@ -265,7 +297,14 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
             beer.is_current = False
 
     log.status = "ok" if not errors else "partial"
-    log.detail = " | ".join(errors)[:2000] if errors else ""
+    if errors:
+        log.detail = " | ".join(errors)[:2000]
+    elif cached_hits and not llm_calls:
+        log.detail = f"page{'s' if cached_hits != 1 else ''} unchanged — reused cached parse, no API calls"
+    elif cached_hits:
+        log.detail = f"{llm_calls} page(s) re-parsed, {cached_hits} unchanged (cached)"
+    else:
+        log.detail = ""
     log.beers_found = len(parsed)
     log.new_beers = len(new_beers)
     _finish(db, brewery, log)
@@ -281,7 +320,8 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
 def _finish(db: Session, brewery: Brewery, log: ScrapeLog) -> None:
     brewery.last_scraped_at = utcnow()
     if log.status == "ok":
-        summary = f"ok ({log.beers_found} beers, {log.new_beers} new)"
+        base = f"ok ({log.beers_found} beers, {log.new_beers} new)"
+        summary = f"{base} — {log.detail}" if log.detail else base
     else:
         summary = f"{log.status}: {log.detail}" if log.detail else log.status
     brewery.last_scrape_status = summary[:500]

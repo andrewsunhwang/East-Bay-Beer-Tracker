@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
     create_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
@@ -118,6 +119,23 @@ class AlertNotification(Base):
     alert_id: Mapped[int] = mapped_column(ForeignKey("alerts.id"))
     beer_id: Mapped[int] = mapped_column(ForeignKey("beers.id"))
     sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SourcePage(Base):
+    """Per-URL cache: the hash of the last-fetched page text and the beer list
+    the LLM extracted from it. If the text is byte-identical next time, we reuse
+    the stored parse instead of paying for another LLM call."""
+
+    __tablename__ = "source_pages"
+    __table_args__ = (UniqueConstraint("brewery_id", "url", name="uq_source_page"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    brewery_id: Mapped[int] = mapped_column(ForeignKey("breweries.id"))
+    url: Mapped[str] = mapped_column(String(500))
+    content_hash: Mapped[str] = mapped_column(String(64), default="")
+    parsed_json: Mapped[str] = mapped_column(Text, default="")
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ScrapeLog(Base):
