@@ -52,7 +52,7 @@
           {% if beer.style %}<span class="badge">{{ beer.style }}</span>{% endif %}
           {% if beer.abv is not none %}<span class="badge">{{ beer.abv }}% ABV</span>{% endif %}
           {% if beer.availability %}<span class="badge">{{ beer.availability }}</span>{% endif %}
-          {% if not beer.is_current %}<span class="badge retired">no longer listed</span>{% endif %}
+          {% if not beer.is_current %}<span class="badge retired">no longer listed — last seen {{ beer.last_seen|timeago }}</span>{% endif %}
         </div>
         {% if beer.description %}<p class="beer-desc">{{ beer.description }}</p>{% endif %}
       </div>

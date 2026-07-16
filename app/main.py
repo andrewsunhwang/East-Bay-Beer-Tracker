@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote
 
@@ -13,7 +13,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from . import auth, config, scraper
@@ -24,6 +24,28 @@ logger = logging.getLogger("beer_tracker")
 
 APP_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
+
+
+def timeago(dt: datetime | None) -> str:
+    """'12 minutes ago' for recent timestamps, a plain date for older ones."""
+    if dt is None:
+        return "never"
+    if dt.tzinfo is None:  # SQLite drops tzinfo; stored values are UTC
+        dt = dt.replace(tzinfo=timezone.utc)
+    seconds = (datetime.now(timezone.utc) - dt).total_seconds()
+    if seconds < 90:
+        return "just now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} minutes ago"
+    if seconds < 172800:  # under 2 days
+        hours = int(seconds // 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    if seconds < 604800:  # under a week
+        return f"{int(seconds // 86400)} days ago"
+    return dt.strftime("%b %d, %Y")
+
+
+templates.env.filters["timeago"] = timeago
 
 
 async def daily_scrape_loop() -> None:
@@ -140,6 +162,20 @@ def index(
         },
     )
     return templates.TemplateResponse(request, "index.html", ctx)
+
+
+@app.get("/breweries", response_class=HTMLResponse)
+def breweries_page(request: Request, db: Session = Depends(get_db)):
+    breweries = db.query(Brewery).order_by(Brewery.name).all()
+    current_counts = dict(
+        db.query(Beer.brewery_id, func.count(Beer.id))
+        .filter(Beer.is_current.is_(True))
+        .group_by(Beer.brewery_id)
+        .all()
+    )
+    ctx = base_context(request)
+    ctx.update(breweries=breweries, current_counts=current_counts)
+    return templates.TemplateResponse(request, "breweries.html", ctx)
 
 
 # --------------------------------------------------------------------- auth
