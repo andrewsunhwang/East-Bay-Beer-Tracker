@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Form, Request
+from fastapi import Query as FastQuery
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -45,7 +47,17 @@ def timeago(dt: datetime | None) -> str:
     return dt.strftime("%b %d, %Y")
 
 
+def is_new(dt: datetime | None) -> bool:
+    """True when a timestamp is within the last 7 days (for 'new' badges)."""
+    if dt is None:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt) < timedelta(days=7)
+
+
 templates.env.filters["timeago"] = timeago
+templates.env.filters["is_new"] = is_new
 
 
 async def daily_scrape_loop() -> None:
@@ -108,18 +120,67 @@ def redirect(path: str, msg: str = "", error: str = "") -> RedirectResponse:
 # ---------------------------------------------------------------- public site
 
 
+PREFS_COOKIE = "ebbt_prefs"
+
+SORT_COLUMNS = {
+    "name": Beer.name,
+    "brewery": Brewery.name,
+    "style": Beer.style,
+    "abv": Beer.abv,
+    "availability": Beer.availability,
+    "added": Beer.first_seen,
+}
+
+
+def _index_url(state: dict, **overrides) -> str:
+    """Build a beer-list URL from the current filter state with overrides."""
+    params = {**state, **overrides}
+    pairs = []
+    for key, value in params.items():
+        if isinstance(value, list):
+            pairs.extend((key, item) for item in value)
+        elif value:
+            pairs.append((key, value))
+    qs = urlencode(pairs)
+    return "/?" + qs if qs else "/?clear=1"
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(
     request: Request,
     db: Session = Depends(get_db),
     q: str = "",
     brewery_id: str = "",
-    style: str = "",
+    style: list[str] = FastQuery(default=[]),
     abv_min: str = "",
     abv_max: str = "",
     availability: str = "",
     show_retired: str = "",
+    sort: str = "",
+    dir: str = "",
+    view: str = "",
+    clear: str = "",
 ):
+    # Remembered preferences (checked styles + view) live in a cookie the
+    # server sets whenever filters are used. A bare visit to "/" restores
+    # them; "/?clear=1" (the Reset link) wipes them.
+    prefs = {}
+    raw_prefs = request.cookies.get(PREFS_COOKIE)
+    if raw_prefs:
+        try:
+            prefs = json.loads(raw_prefs)
+        except ValueError:
+            prefs = {}
+    bare_visit = not request.url.query
+    if bare_visit:
+        style = [s for s in prefs.get("styles", []) if isinstance(s, str)]
+    if not view:
+        view = prefs.get("view", "tiles")
+    if view not in ("tiles", "list"):
+        view = "tiles"
+    if clear:
+        style = []
+
     query = db.query(Beer).options(joinedload(Beer.brewery)).join(Brewery)
     if not show_retired:
         query = query.filter(Beer.is_current.is_(True))
@@ -130,8 +191,9 @@ def index(
         )
     if brewery_id.isdigit():
         query = query.filter(Beer.brewery_id == int(brewery_id))
-    if style.strip():
-        query = query.filter(Beer.style.ilike(f"%{style.strip()}%"))
+    style = [s for s in style if s.strip()]
+    if style:
+        query = query.filter(Beer.style.in_(style))
     try:
         if abv_min.strip():
             query = query.filter(Beer.abv >= float(abv_min))
@@ -142,26 +204,71 @@ def index(
     if availability.strip():
         query = query.filter(Beer.availability.ilike(f"%{availability.strip()}%"))
 
-    beers = query.order_by(Brewery.name, Beer.name).all()
+    sort_col = SORT_COLUMNS.get(sort)
+    direction = "desc" if dir == "desc" else "asc"
+    if sort_col is not None:
+        primary = sort_col.desc() if direction == "desc" else sort_col.asc()
+        beers = query.order_by(primary, Brewery.name, Beer.name).all()
+    else:
+        beers = query.order_by(Brewery.name, Beer.name).all()
+
     breweries = db.query(Brewery).order_by(Brewery.name).all()
+    style_counts = dict(
+        db.query(Beer.style, func.count(Beer.id))
+        .filter(Beer.is_current.is_(True), Beer.style != "")
+        .group_by(Beer.style)
+        .all()
+    )
     styles = sorted({s for (s,) in db.query(Beer.style).distinct() if s})
+
+    state = {
+        "q": q.strip(),
+        "brewery_id": brewery_id if brewery_id.isdigit() else "",
+        "style": style,
+        "abv_min": abv_min.strip(),
+        "abv_max": abv_max.strip(),
+        "availability": availability.strip(),
+        "show_retired": show_retired,
+        "sort": sort if sort_col is not None else "",
+        "dir": direction if sort_col is not None else "",
+        "view": view,
+    }
+    # Column-header links: clicking the active column flips direction.
+    sort_urls, sort_marks = {}, {}
+    for col in SORT_COLUMNS:
+        if state["sort"] == col and direction == "asc":
+            sort_urls[col] = _index_url(state, sort=col, dir="desc")
+        else:
+            sort_urls[col] = _index_url(state, sort=col, dir="asc")
+        sort_marks[col] = (" ▲" if direction == "asc" else " ▼") if state["sort"] == col else ""
+    view_urls = {
+        "tiles": _index_url(state, view="tiles"),
+        "list": _index_url(state, view="list"),
+    }
 
     ctx = base_context(request)
     ctx.update(
         beers=beers,
         breweries=breweries,
         styles=styles,
-        filters={
-            "q": q,
-            "brewery_id": brewery_id,
-            "style": style,
-            "abv_min": abv_min,
-            "abv_max": abv_max,
-            "availability": availability,
-            "show_retired": show_retired,
-        },
+        style_counts=style_counts,
+        filters=state,
+        view=view,
+        sort_urls=sort_urls,
+        sort_marks=sort_marks,
+        view_urls=view_urls,
     )
-    return templates.TemplateResponse(request, "index.html", ctx)
+    resp = templates.TemplateResponse(request, "index.html", ctx)
+    if clear:
+        resp.delete_cookie(PREFS_COOKIE)
+    elif not bare_visit:
+        resp.set_cookie(
+            PREFS_COOKIE,
+            json.dumps({"styles": style, "view": view}),
+            max_age=180 * 24 * 3600,
+            samesite="lax",
+        )
+    return resp
 
 
 @app.get("/breweries", response_class=HTMLResponse)
