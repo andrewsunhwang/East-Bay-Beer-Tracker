@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from . import config, emailer
+from .styles import StyleFamily, classify_style_family
 from .db import (
     Alert,
     AlertNotification,
@@ -94,6 +95,10 @@ class ParsedBeer(BaseModel):
     style: Optional[str] = Field(
         default=None, description="Beer style, e.g. 'West Coast IPA', 'Czech Pilsner'"
     )
+    style_family: Optional[StyleFamily] = Field(
+        default=None,
+        description="The broad family this beer's style belongs to",
+    )
     abv: Optional[float] = Field(default=None, description="Alcohol by volume as a percentage, e.g. 6.8")
     description: Optional[str] = Field(default=None, description="Short description if present on the page")
     availability: Optional[str] = Field(
@@ -136,6 +141,7 @@ def parse_beers_with_llm(brewery_name: str, url: str, page_text: str) -> list[Pa
         system=(
             "You extract structured beer lists from the text of brewery web pages. "
             "Include only beers (and brewery-made ciders/seltzers/hard kombucha, noting that in style). "
+            "Assign each beer's style_family from the allowed values based on its style. "
             "Exclude merchandise, food, events, guest wines, and navigation text. "
             "If the same beer appears in multiple formats, return it once and combine availability. "
             "If the page contains no beer list, return an empty list."
@@ -187,6 +193,7 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
                     existing = parsed[key]
                     # Merge: keep first non-empty value for each field.
                     existing.style = existing.style or beer.style
+                    existing.style_family = existing.style_family or beer.style_family
                     existing.abv = existing.abv if existing.abv is not None else beer.abv
                     existing.description = existing.description or beer.description
                     if beer.availability and beer.availability != existing.availability:
@@ -233,6 +240,7 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
                 brewery_id=brewery.id,
                 name=pb.name.strip(),
                 style=(pb.style or "").strip(),
+                style_family=pb.style_family or classify_style_family(pb.style, pb.name),
                 abv=pb.abv,
                 description=(pb.description or "").strip(),
                 availability=(pb.availability or "").strip(),
@@ -244,6 +252,7 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
             new_beers.append(beer)
         else:
             beer.style = (pb.style or beer.style or "").strip()
+            beer.style_family = pb.style_family or beer.style_family or classify_style_family(beer.style, beer.name)
             beer.abv = pb.abv if pb.abv is not None else beer.abv
             beer.description = (pb.description or beer.description or "").strip()
             beer.availability = (pb.availability or "").strip()
