@@ -17,16 +17,16 @@
       {% endfor %}
     </select>
   </label>
-  <details class="style-picker" {% if filters.style %}open{% endif %}>
-    <summary>Styles{% if filters.style %} ({{ filters.style|length }} selected){% endif %}</summary>
+  <details class="style-picker" {% if filters.family %}open{% endif %}>
+    <summary>Styles{% if filters.family %} ({{ filters.family|length }} selected){% endif %}</summary>
     <div class="style-options">
-      {% for s in styles %}
+      {% for f in families %}
         <label class="style-option">
-          <input type="checkbox" name="style" value="{{ s }}" {% if s in filters.style %}checked{% endif %}>
-          {{ s }}{% if style_counts.get(s) %} <span class="hint">({{ style_counts[s] }})</span>{% endif %}
+          <input type="checkbox" name="family" value="{{ f }}" {% if f in filters.family %}checked{% endif %}>
+          {{ f }} <span class="hint">({{ family_counts[f] }})</span>
         </label>
       {% endfor %}
-      {% if not styles %}<span class="hint">No styles yet — run a scrape first.</span>{% endif %}
+      {% if not families %}<span class="hint">No styles yet — run a scrape first.</span>{% endif %}
     </div>
   </details>
   <label>ABV min
@@ -45,6 +45,20 @@
   <button type="submit">Filter</button>
   <a class="button ghost" href="/?clear=1">Reset</a>
 </form>
+
+{% if new_beers %}
+  <div class="card new-strip">
+    <h2>🆕 New this week</h2>
+    <div class="new-chips">
+      {% for beer in new_beers %}
+        <a class="new-chip" href="/beers/{{ beer.id }}">
+          <strong>{{ beer.name }}</strong>
+          <span class="hint">{{ beer.brewery.name }}{% if beer.style %} · {{ beer.style }}{% endif %}</span>
+        </a>
+      {% endfor %}
+    </div>
+  </div>
+{% endif %}
 
 <div class="list-controls">
   <span class="hint">{{ beers|length }} beer{{ '' if beers|length == 1 else 's' }} shown.</span>
@@ -68,7 +82,7 @@
       {% for beer in beers %}
         <tr>
           <td>
-            <strong>{{ beer.name }}</strong>
+            <a class="beer-link" href="/beers/{{ beer.id }}"><strong>{{ beer.name }}</strong></a>
             {% if beer.is_current and beer.first_seen|is_new %}<span class="badge new">new</span>{% endif %}
             {% if not beer.is_current %}<span class="badge retired">last seen {{ beer.last_seen|timeago }}</span>{% endif %}
           </td>
@@ -84,7 +98,7 @@
     <div class="beer-grid">
       {% for beer in beers %}
         <div class="beer-card">
-          <h3>{{ beer.name }}
+          <h3><a class="beer-link" href="/beers/{{ beer.id }}">{{ beer.name }}</a>
             {% if beer.is_current and beer.first_seen|is_new %}<span class="badge new">new</span>{% endif %}
           </h3>
           <div class="beer-meta">

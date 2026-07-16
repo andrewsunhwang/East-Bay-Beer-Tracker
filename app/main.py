@@ -19,6 +19,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from . import auth, config, scraper
+from . import styles as styles_mod
 from .db import Alert, Beer, Brewery, ScrapeLog, SessionLocal, init_db, seed_if_empty
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -151,7 +152,7 @@ def index(
     db: Session = Depends(get_db),
     q: str = "",
     brewery_id: str = "",
-    style: list[str] = FastQuery(default=[]),
+    family: list[str] = FastQuery(default=[]),
     abv_min: str = "",
     abv_max: str = "",
     availability: str = "",
@@ -173,13 +174,13 @@ def index(
             prefs = {}
     bare_visit = not request.url.query
     if bare_visit:
-        style = [s for s in prefs.get("styles", []) if isinstance(s, str)]
+        family = [f for f in prefs.get("families", []) if isinstance(f, str)]
     if not view:
         view = prefs.get("view", "tiles")
     if view not in ("tiles", "list"):
         view = "tiles"
     if clear:
-        style = []
+        family = []
 
     query = db.query(Beer).options(joinedload(Beer.brewery)).join(Brewery)
     if not show_retired:
@@ -191,9 +192,9 @@ def index(
         )
     if brewery_id.isdigit():
         query = query.filter(Beer.brewery_id == int(brewery_id))
-    style = [s for s in style if s.strip()]
-    if style:
-        query = query.filter(Beer.style.in_(style))
+    family = [f for f in family if f in styles_mod.FAMILIES]
+    if family:
+        query = query.filter(Beer.style_family.in_(family))
     try:
         if abv_min.strip():
             query = query.filter(Beer.abv >= float(abv_min))
@@ -213,18 +214,31 @@ def index(
         beers = query.order_by(Brewery.name, Beer.name).all()
 
     breweries = db.query(Brewery).order_by(Brewery.name).all()
-    style_counts = dict(
-        db.query(Beer.style, func.count(Beer.id))
-        .filter(Beer.is_current.is_(True), Beer.style != "")
-        .group_by(Beer.style)
+    family_counts = dict(
+        db.query(Beer.style_family, func.count(Beer.id))
+        .filter(Beer.is_current.is_(True), Beer.style_family != "")
+        .group_by(Beer.style_family)
         .all()
     )
-    styles = sorted({s for (s,) in db.query(Beer.style).distinct() if s})
+    families = [f for f in styles_mod.FAMILIES if family_counts.get(f)]
+
+    # "New this week" strip: shown on unfiltered views only.
+    has_filters = bool(
+        q.strip() or brewery_id or family or abv_min.strip() or abv_max.strip()
+        or availability.strip() or show_retired
+    )
+    new_beers = []
+    if not has_filters:
+        new_beers = sorted(
+            (b for b in beers if b.is_current and is_new(b.first_seen)),
+            key=lambda b: b.first_seen,
+            reverse=True,
+        )[:12]
 
     state = {
         "q": q.strip(),
         "brewery_id": brewery_id if brewery_id.isdigit() else "",
-        "style": style,
+        "family": family,
         "abv_min": abv_min.strip(),
         "abv_max": abv_max.strip(),
         "availability": availability.strip(),
@@ -250,8 +264,9 @@ def index(
     ctx.update(
         beers=beers,
         breweries=breweries,
-        styles=styles,
-        style_counts=style_counts,
+        families=families,
+        family_counts=family_counts,
+        new_beers=new_beers,
         filters=state,
         view=view,
         sort_urls=sort_urls,
@@ -264,11 +279,32 @@ def index(
     elif not bare_visit:
         resp.set_cookie(
             PREFS_COOKIE,
-            json.dumps({"styles": style, "view": view}),
+            json.dumps({"families": family, "view": view}),
             max_age=180 * 24 * 3600,
             samesite="lax",
         )
     return resp
+
+
+@app.get("/beers/{beer_id}", response_class=HTMLResponse)
+def beer_detail(beer_id: int, request: Request, db: Session = Depends(get_db)):
+    beer = (
+        db.query(Beer)
+        .options(joinedload(Beer.brewery))
+        .filter(Beer.id == beer_id)
+        .first()
+    )
+    if beer is None:
+        return redirect("/", error="Beer not found.")
+    siblings = (
+        db.query(Beer)
+        .filter(Beer.brewery_id == beer.brewery_id, Beer.id != beer.id, Beer.is_current.is_(True))
+        .order_by(Beer.name)
+        .all()
+    )
+    ctx = base_context(request)
+    ctx.update(beer=beer, siblings=siblings)
+    return templates.TemplateResponse(request, "beer.html", ctx)
 
 
 @app.get("/breweries", response_class=HTMLResponse)

@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ beer.name }} — East Bay Beer Tracker{% endblock %}
+{% block content %}
+<p><a href="/">← All beers</a></p>
+
+<div class="card">
+  <h1 style="margin-top:0;">
+    {{ beer.name }}
+    {% if beer.is_current and beer.first_seen|is_new %}<span class="badge new">new</span>{% endif %}
+    {% if not beer.is_current %}<span class="badge retired">no longer listed</span>{% endif %}
+  </h1>
+  <div class="beer-meta">
+    {% if beer.brewery.website %}
+      <a href="{{ beer.brewery.website }}" target="_blank" rel="noopener">{{ beer.brewery.name }}</a>
+    {% else %}
+      {{ beer.brewery.name }}
+    {% endif %}
+    {% if beer.brewery.location %} · {{ beer.brewery.location }}{% endif %}
+  </div>
+  <div style="margin: 0.5rem 0;">
+    {% if beer.style %}<span class="badge">{{ beer.style }}</span>{% endif %}
+    {% if beer.style_family and beer.style_family != beer.style %}<span class="badge">{{ beer.style_family }}</span>{% endif %}
+    {% if beer.abv is not none %}<span class="badge">{{ beer.abv }}% ABV</span>{% endif %}
+    {% if beer.availability %}<span class="badge">{{ beer.availability }}</span>{% endif %}
+  </div>
+  {% if beer.description %}<p>{{ beer.description }}</p>{% endif %}
+
+  <h2>History</h2>
+  <table style="max-width: 32rem;">
+    <tr><th>First spotted</th><td>{{ beer.first_seen|timeago }} ({{ beer.first_seen.strftime('%b %d, %Y') }})</td></tr>
+    <tr><th>Last seen on the menu</th><td>{{ beer.last_seen|timeago }} ({{ beer.last_seen.strftime('%b %d, %Y') }})</td></tr>
+    <tr><th>Status</th>
+      <td>{% if beer.is_current %}<span class="status-ok">currently offered</span>
+          {% else %}retired from the brewery's list{% endif %}</td></tr>
+  </table>
+</div>
+
+{% if siblings %}
+  <h2>More from {{ beer.brewery.name }}</h2>
+  <div class="new-chips">
+    {% for s in siblings %}
+      <a class="new-chip" href="/beers/{{ s.id }}">
+        <strong>{{ s.name }}</strong>
+        <span class="hint">{% if s.style %}{{ s.style }}{% endif %}{% if s.abv is not none %} · {{ s.abv }}%{% endif %}</span>
+      </a>
+    {% endfor %}
+  </div>
+{% endif %}
+{% endblock %}

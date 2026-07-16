@@ -64,9 +64,14 @@ erDiagram
   these are the pages the daily scraper reads). `is_active` controls whether
   it's included in scrapes. The admin panel is the CRUD surface for this table.
 - **Beer** — belongs to a brewery. Fields extracted by the LLM: name, style,
-  ABV, description, availability. Lifecycle fields: `first_seen`, `last_seen`,
+  ABV, description, availability, and `style_family` — one of ~11 canonical
+  families (see `app/styles.py`) assigned by the LLM at scrape time, with a
+  keyword classifier as fallback/backfill; the family drives the style filter
+  checkboxes. Lifecycle fields: `first_seen`, `last_seen`,
   and `is_current` (set false when a beer disappears from the brewery's page —
-  it is retired, never deleted, so history is preserved).
+  it is retired, never deleted, so history is preserved). Each beer has a
+  detail page at `/beers/{id}` showing its description and first/last-seen
+  history.
 - **User** — just an email address. Created on first successful sign-in.
 - **LoginCode** — hashed one-time codes with expiry, attempt counter, and a
   used flag. Codes are never stored in plaintext.

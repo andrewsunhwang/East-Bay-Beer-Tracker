@@ -54,6 +54,9 @@ class Beer(Base):
     brewery_id: Mapped[int] = mapped_column(ForeignKey("breweries.id"))
     name: Mapped[str] = mapped_column(String(300))
     style: Mapped[str] = mapped_column(String(200), default="")
+    # Canonical family (see app/styles.py) — assigned by the LLM at scrape
+    # time, keyword-classified as a fallback. Drives the style filter.
+    style_family: Mapped[str] = mapped_column(String(50), default="")
     abv: Mapped[float | None] = mapped_column(Float, nullable=True)
     description: Mapped[str] = mapped_column(Text, default="")
     availability: Mapped[str] = mapped_column(String(100), default="")
@@ -140,6 +143,30 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 def init_db() -> None:
     Base.metadata.create_all(engine)
+    _migrate_schema()
+    _backfill_style_families()
+
+
+def _migrate_schema() -> None:
+    """Additive SQLite migrations for databases created by older versions."""
+    with engine.connect() as conn:
+        cols = [row[1] for row in conn.exec_driver_sql("PRAGMA table_info(beers)")]
+        if "style_family" not in cols:
+            conn.exec_driver_sql("ALTER TABLE beers ADD COLUMN style_family VARCHAR(50) NOT NULL DEFAULT ''")
+            conn.commit()
+
+
+def _backfill_style_families() -> None:
+    """Classify any beers without a family (pre-existing rows); the LLM
+    refines these on the next scrape."""
+    from .styles import classify_style_family
+
+    with SessionLocal() as db:
+        missing = db.query(Beer).filter(Beer.style_family == "").all()
+        for beer in missing:
+            beer.style_family = classify_style_family(beer.style, beer.name)
+        if missing:
+            db.commit()
 
 
 SEED_BREWERIES = [
