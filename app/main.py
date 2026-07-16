@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from . import auth, config, scraper
 from . import styles as styles_mod
-from .db import Alert, Beer, Brewery, ScrapeLog, SessionLocal, init_db, seed_if_empty
+from .db import Alert, Beer, Brewery, ScrapeLog, SessionLocal, SourcePage, init_db, seed_if_empty
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger("beer_tracker")
@@ -589,6 +589,7 @@ def brewery_delete(brewery_id: int, request: Request, db: Session = Depends(get_
     brewery = db.get(Brewery, brewery_id)
     if brewery is not None:
         db.query(ScrapeLog).filter(ScrapeLog.brewery_id == brewery_id).delete()
+        db.query(SourcePage).filter(SourcePage.brewery_id == brewery_id).delete()
         db.delete(brewery)
         db.commit()
         return redirect("/admin", msg=f"Deleted {brewery.name} and its beers.")

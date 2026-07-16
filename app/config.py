@@ -25,7 +25,7 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:8000").rstrip("/")
 SCRAPE_HOUR = int(os.environ.get("SCRAPE_HOUR", "4"))
 
 # Claude model used for parsing brewery pages.
-CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-opus-4-8")
+CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-5")
 
 # Max characters of page text sent to the LLM per source URL.
 SCRAPE_TEXT_LIMIT = int(os.environ.get("SCRAPE_TEXT_LIMIT", "80000"))

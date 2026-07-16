@@ -80,9 +80,12 @@ erDiagram
   paused (`is_active`).
 - **AlertNotification** — records each (alert, beer) pair already emailed, so
   a user is never notified twice about the same beer.
+- **SourcePage** — per (brewery, URL) cache: the SHA-256 hash of the last
+  page text and the JSON beer list parsed from it. Lets an unchanged page
+  skip the LLM call entirely (see the scraping pipeline below).
 - **ScrapeLog** — one row per brewery per scrape run: status (`ok` /
-  `partial` / `error`), beers found, new beers, error detail. Shown in the
-  admin panel.
+  `partial` / `warning` / `error`), beers found, new beers, detail (errors,
+  or a note when pages were served from cache). Shown in the admin panel.
 
 ## Authentication design
 
@@ -133,28 +136,38 @@ Per active brewery, for each of its scrape URLs:
 2. **Reduce to text**: BeautifulSoup strips `script`/`style`/`svg`/etc.,
    collapses whitespace, caps at `SCRAPE_TEXT_LIMIT` (80k chars). Sending
    text instead of raw HTML keeps token costs low and removes markup noise.
-3. **LLM extraction**: one call to Claude (`CLAUDE_MODEL`, default
-   `claude-opus-4-8`) using the SDK's `messages.parse` with a Pydantic
-   schema (`ParsedBeerList`), so the response is guaranteed-valid structured
-   data — no ad-hoc JSON parsing. The prompt scopes extraction to beers only
-   (no merch/food/events) and returns an empty list for pages without a beer
-   list.
-4. **Merge across URLs**: beers are keyed by normalized name (lowercased,
+3. **Cache check**: the extracted text is SHA-256 hashed and compared to the
+   `SourcePage` row for that (brewery, URL). If the hash is unchanged since
+   the last successful parse, the stored beer list is **reused and the LLM
+   call is skipped entirely** — the common case, since most brewery pages
+   don't change day to day. Only changed pages advance to step 4.
+4. **LLM extraction** (skipped on a cache hit): one call to Claude
+   (`CLAUDE_MODEL`, default `claude-sonnet-5`) using the SDK's
+   `messages.parse` with a Pydantic schema (`ParsedBeerList`), so the
+   response is guaranteed-valid structured data — no ad-hoc JSON parsing. The
+   prompt scopes extraction to beers only (no merch/food/events) and returns
+   an empty list for pages without a beer list. The parse (text hash + beer
+   list) is written to `SourcePage` for next time. The system prompt is held
+   byte-stable so Anthropic's prompt cache is reused across breweries.
+5. **Merge across URLs**: beers are keyed by normalized name (lowercased,
    punctuation stripped); duplicates across a brewery's URLs are merged,
-   combining availability.
-5. **Upsert**:
+   combining availability. Cached and freshly-parsed URLs merge the same way,
+   so a brewery with one unchanged page and one changed page still produces
+   the full, correct list.
+6. **Upsert**:
    - existing beer (by normalized name) → update fields, bump `last_seen`,
      re-mark current;
    - unseen name → insert with `first_seen = now` and collect as a **new
      beer**;
    - previously-current beers missing from this scrape → `is_current = False`.
-6. **Alerts**: every new beer is tested against all active alerts
+7. **Alerts**: every new beer is tested against all active alerts
    (`alert_matches`: brewery, style substring, keyword across
    name/style/description, ABV range). Matches not already in
    `AlertNotification` are recorded and batched into **one email per user**
    listing all their matched beers.
-7. **Logging**: a `ScrapeLog` row per brewery per run; the brewery row also
-   carries `last_scraped_at` / `last_scrape_status` for the admin summary.
+8. **Logging**: a `ScrapeLog` row per brewery per run; the brewery row also
+   carries `last_scraped_at` / `last_scrape_status` for the admin summary
+   (which notes when pages were served from cache).
 
 Failure isolation: an error on one URL doesn't abort the brewery (status
 becomes `partial`); an error on one brewery doesn't abort the run. If *all*
