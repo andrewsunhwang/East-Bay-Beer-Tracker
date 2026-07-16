@@ -89,6 +89,7 @@ button.danger { background: transparent; color: var(--err-ink); border: 1px soli
 }
 .badge.new { background: var(--ok-bg); color: var(--ok-ink); font-weight: 600; }
 .badge.retired { background: #eee; color: #777; }
+.badge.warn { background: #fdf3e0; color: #8a5a00; cursor: help; }
 
 .empty { color: var(--muted); padding: 2rem 0; text-align: center; }
 
@@ -112,6 +113,7 @@ tr:last-child td { border-bottom: none; }
 .brewery-block summary { cursor: pointer; font-weight: 600; padding: 0.4rem 0; }
 .status-ok { color: var(--ok-ink); }
 .status-error, .status-partial { color: var(--err-ink); }
+.status-warning { color: #8a5a00; }
 
 .login-box { max-width: 420px; margin: 2rem auto; }
 .login-box input { width: 100%; margin-bottom: 0.75rem; }

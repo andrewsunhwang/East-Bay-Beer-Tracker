@@ -26,7 +26,12 @@
             —
           {% endif %}
         </td>
-        <td>{{ b.last_scraped_at|timeago }}</td>
+        <td>
+          {{ b.last_scraped_at|timeago }}
+          {% if b.last_scraped_at and b.last_scrape_status and not b.last_scrape_status.startswith('ok') %}
+            <br><span class="badge warn" title="{{ b.last_scrape_status }}">⚠ trouble reading this site</span>
+          {% endif %}
+        </td>
       </tr>
     {% endfor %}
   </table>

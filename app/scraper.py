@@ -26,9 +26,67 @@ from .db import (
 
 logger = logging.getLogger("beer_tracker.scraper")
 
-USER_AGENT = (
-    "Mozilla/5.0 (compatible; EastBayBeerTracker/1.0; +https://github.com/andrewsunhwang/east-bay-beer-tracker)"
-)
+# Browser-like headers: many brewery sites sit behind CDNs that 403 anything
+# that doesn't look like a real browser. We fetch one page per brewery per day,
+# so this is polite traffic regardless of the header set.
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Upgrade-Insecure-Requests": "1",
+}
+
+
+class PageTextEmpty(Exception):
+    """The page fetched fine but contained almost no readable text."""
+
+
+def friendly_error(exc: Exception) -> str:
+    """Turn an exception from the fetch/parse pipeline into a message an
+    admin can act on."""
+    if isinstance(exc, PageTextEmpty):
+        return (
+            "the page loaded but contained almost no readable text — the menu is "
+            "probably rendered by JavaScript. Point this brewery at a page whose "
+            "HTML contains the beer list (a print/embed menu URL often works)"
+        )
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code in (401, 403):
+            return (
+                f"the site blocked our request (HTTP {code} — likely bot protection). "
+                "Try a different page on the same site, or an embed/print menu URL"
+            )
+        if code == 404:
+            return "page not found (HTTP 404) — the URL has probably changed; update it"
+        if code == 429:
+            return "the site rate-limited us (HTTP 429) — it may work on the next daily run"
+        if code >= 500:
+            return f"the brewery's website returned a server error (HTTP {code})"
+        return f"unexpected response from the site (HTTP {code})"
+    if isinstance(exc, httpx.TooManyRedirects):
+        return "the URL redirects in a loop — check it in a browser and update it"
+    if isinstance(exc, httpx.TimeoutException):
+        return "the site took too long to respond (timeout)"
+    if isinstance(exc, httpx.RequestError):
+        return "couldn't reach the site (connection/DNS failure) — check the URL is correct"
+    if isinstance(exc, anthropic.AuthenticationError):
+        return "Claude API key is missing or invalid — set ANTHROPIC_API_KEY on the server"
+    if isinstance(exc, anthropic.RateLimitError):
+        return "Claude API rate limit hit — it should succeed on the next run"
+    if isinstance(exc, anthropic.APIStatusError):
+        return f"Claude API error while parsing the page ({exc.status_code})"
+    if isinstance(exc, anthropic.APIConnectionError):
+        return "couldn't reach the Claude API (network error from the server)"
+    if "api_key" in str(exc).lower():
+        return "Claude API key is missing — set ANTHROPIC_API_KEY on the server"
+    return f"unexpected error: {type(exc).__name__}: {exc}"
 
 
 class ParsedBeer(BaseModel):
@@ -56,7 +114,7 @@ def fetch_page_text(url: str) -> str:
     with httpx.Client(
         follow_redirects=True,
         timeout=30,
-        headers={"User-Agent": USER_AGENT},
+        headers=BROWSER_HEADERS,
     ) as client:
         resp = client.get(url)
         resp.raise_for_status()
@@ -119,6 +177,8 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
     for url in urls:
         try:
             text = fetch_page_text(url)
+            if len(text.strip()) < 200:
+                raise PageTextEmpty(url)
             for beer in parse_beers_with_llm(brewery.name, url, text):
                 key = _norm_name(beer.name)
                 if not key:
@@ -139,7 +199,7 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
                     parsed[key] = beer
         except Exception as exc:  # network, parse, or API failure for this URL
             logger.exception("Scrape failed for %s (%s)", brewery.name, url)
-            errors.append(f"{url}: {exc}")
+            errors.append(f"{url}: {friendly_error(exc)}")
 
     if errors and not parsed:
         log.status = "error"
@@ -149,6 +209,18 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
 
     existing_beers = db.query(Beer).filter(Beer.brewery_id == brewery.id).all()
     existing_by_key = {_norm_name(b.name): b for b in existing_beers}
+
+    # Safety guard: a page that loads but yields zero beers (redesign, outage
+    # page, JS-rendered menu) must not silently retire the whole list.
+    if not parsed and any(b.is_current for b in existing_beers):
+        log.status = "warning"
+        log.detail = (
+            "No beers found on the page — kept the existing list untouched. "
+            "If this persists, the menu may have moved or be JavaScript-rendered; "
+            "check the scrape URL."
+        )
+        _finish(db, brewery, log)
+        return log
     now = utcnow()
     new_beers: list[Beer] = []
     seen_keys = set()
@@ -199,7 +271,10 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
 
 def _finish(db: Session, brewery: Brewery, log: ScrapeLog) -> None:
     brewery.last_scraped_at = utcnow()
-    summary = log.status if log.status != "ok" else f"ok ({log.beers_found} beers, {log.new_beers} new)"
+    if log.status == "ok":
+        summary = f"ok ({log.beers_found} beers, {log.new_beers} new)"
+    else:
+        summary = f"{log.status}: {log.detail}" if log.detail else log.status
     brewery.last_scrape_status = summary[:500]
     db.add(log)
     db.commit()
