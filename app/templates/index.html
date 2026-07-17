@@ -82,7 +82,7 @@
       {% for beer in beers %}
         <tr>
           <td>
-            <a class="beer-link" href="/beers/{{ beer.id }}"><strong>{{ beer.name }}</strong></a>
+            <a class="beer-link" href="/beers/{{ beer.id }}"{% if beer.description %} title="Described as: {{ beer.description }}"{% endif %}><strong>{{ beer.name }}</strong></a>
             {% if beer.is_current and beer.first_seen|is_new %}<span class="badge new">new</span>{% endif %}
             {% if not beer.is_current %}<span class="badge retired">last seen {{ beer.last_seen|timeago }}</span>{% endif %}
           </td>
@@ -110,7 +110,7 @@
             {% if beer.availability %}<span class="badge">{{ beer.availability }}</span>{% endif %}
             {% if not beer.is_current %}<span class="badge retired">no longer listed — last seen {{ beer.last_seen|timeago }}</span>{% endif %}
           </div>
-          {% if beer.description %}<p class="beer-desc">{{ beer.description }}</p>{% endif %}
+          {% if beer.description %}<p class="beer-desc"><span class="desc-label">Described as:</span> “{{ beer.description }}”</p>{% endif %}
         </div>
       {% endfor %}
     </div>

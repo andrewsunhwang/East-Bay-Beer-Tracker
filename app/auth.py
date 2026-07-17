@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import re
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Request
@@ -32,6 +33,44 @@ def valid_email(email: str) -> bool:
 
 def _hash_code(email: str, code: str) -> str:
     return hashlib.sha256(f"{email}:{code}:{config.SECRET_KEY}".encode()).hexdigest()
+
+
+# --- rate limiting for code requests (protects the SMTP account from abuse)
+RATE_WINDOW_MINUTES = 15
+MAX_CODES_PER_EMAIL = 3  # per window, tracked in the DB (survives restarts)
+MAX_REQUESTS_PER_IP = 12  # per window, in-memory (resets on restart — fine)
+
+_ip_hits: dict[str, list[float]] = {}
+
+
+def client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:  # Railway/most proxies put the real client first
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def code_request_rate_limited(db: Session, email: str, ip: str) -> bool:
+    """True when this email or IP has requested too many codes recently."""
+    now = time.monotonic()
+    window_start = now - RATE_WINDOW_MINUTES * 60
+    hits = [t for t in _ip_hits.get(ip, []) if t > window_start]
+    if len(hits) >= MAX_REQUESTS_PER_IP:
+        _ip_hits[ip] = hits
+        return True
+    hits.append(now)
+    _ip_hits[ip] = hits
+    if len(_ip_hits) > 5000:  # bound memory under address-spraying
+        for key in [k for k, v in _ip_hits.items() if not v or v[-1] <= window_start]:
+            _ip_hits.pop(key, None)
+
+    cutoff = utcnow() - timedelta(minutes=RATE_WINDOW_MINUTES)
+    recent = (
+        db.query(LoginCode)
+        .filter(LoginCode.email == email, LoginCode.created_at >= cutoff)
+        .count()
+    )
+    return recent >= MAX_CODES_PER_EMAIL
 
 
 def request_login_code(db: Session, email: str) -> None:

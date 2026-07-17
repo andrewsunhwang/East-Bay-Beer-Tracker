@@ -82,7 +82,8 @@ button.danger { background: transparent; color: var(--err-ink); border: 1px soli
 }
 .beer-card h3 { margin: 0 0 0.15rem; font-size: 1.05rem; }
 .beer-meta { color: var(--muted); font-size: 0.85rem; margin-bottom: 0.35rem; }
-.beer-desc { font-size: 0.88rem; margin: 0.35rem 0 0; }
+.beer-desc { font-size: 0.88rem; margin: 0.35rem 0 0; font-style: italic; }
+.desc-label { color: var(--muted); font-style: normal; }
 .badge {
   display: inline-block; font-size: 0.72rem; padding: 0.1rem 0.5rem;
   border-radius: 999px; background: #f2e8d9; color: var(--accent-dark); margin-right: 0.3rem;
