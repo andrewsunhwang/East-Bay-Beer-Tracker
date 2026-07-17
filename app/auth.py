@@ -101,7 +101,9 @@ def read_session_email(request: Request) -> str | None:
 
 
 def is_admin(email: str | None) -> bool:
-    return email is not None and email == config.ADMIN_EMAIL
+    # The ADMIN_EMAIL guard matters: with it unset, nobody is admin (rather
+    # than an empty-string session matching an empty config value).
+    return bool(config.ADMIN_EMAIL) and email == config.ADMIN_EMAIL
 
 
 def admin_password_enabled() -> bool:
