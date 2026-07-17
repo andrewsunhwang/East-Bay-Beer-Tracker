@@ -51,10 +51,18 @@ class PageTextEmpty(Exception):
     """The page fetched fine but contained almost no readable text."""
 
 
+class RenderedPageBlocked(Exception):
+    """The headless browser reached the site but got an HTTP error page."""
+
+    def __init__(self, status: int, url: str):
+        self.status = status
+        super().__init__(f"HTTP {status} on rendered fetch of {url}")
+
+
 # Bump when text-extraction logic changes: it salts the cache hash, so cached
 # parses made by older extraction code are invalidated and re-parsed even if
 # the page bytes themselves haven't changed.
-EXTRACTION_VERSION = 3
+EXTRACTION_VERSION = 4
 
 
 def _content_hash(text: str) -> str:
@@ -103,15 +111,21 @@ def fetch_page_text_rendered(url: str) -> str:
                 user_agent=BROWSER_HEADERS["User-Agent"],
                 viewport={"width": 1366, "height": 900},
             )
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
             try:
                 page.wait_for_load_state("networkidle", timeout=15000)
             except Exception:
                 pass  # slow trackers etc. — proceed with whatever has rendered
             html = page.content()
+            status = response.status if response is not None else 200
         finally:
             browser.close()
-    return html_to_text(html)
+    text = html_to_text(html)
+    if status >= 400 and len(text.strip()) < 200:
+        # An error page with no content — surface the status rather than
+        # pretending the page was merely empty.
+        raise RenderedPageBlocked(status, url)
+    return text
 
 
 def friendly_error(exc: Exception) -> str:
@@ -151,6 +165,11 @@ def friendly_error(exc: Exception) -> str:
         return f"Claude API error while parsing the page ({exc.status_code})"
     if isinstance(exc, anthropic.APIConnectionError):
         return "couldn't reach the Claude API (network error from the server)"
+    if isinstance(exc, RenderedPageBlocked):
+        return (
+            f"the site blocked the request even from a real browser (HTTP {exc.status}) — "
+            "its bot protection is aggressive; try a different page on the same site"
+        )
     if "playwright" in type(exc).__module__:
         return f"browser rendering failed ({type(exc).__name__}) — will retry next run"
     if "api_key" in str(exc).lower():
@@ -168,7 +187,13 @@ class ParsedBeer(BaseModel):
         description="The broad family this beer's style belongs to",
     )
     abv: Optional[float] = Field(default=None, description="Alcohol by volume as a percentage, e.g. 6.8")
-    description: Optional[str] = Field(default=None, description="Short description if present on the page")
+    description: Optional[str] = Field(
+        default=None,
+        description=(
+            "The brewery's own description of the beer, quoted verbatim from the "
+            "page (first ~2 sentences if it's long). Null if the page has none."
+        ),
+    )
     availability: Optional[str] = Field(
         default=None,
         description=(
@@ -275,6 +300,36 @@ def fetch_page_text(url: str) -> str:
     return html_to_text(resp.text)
 
 
+def fetch_best_text(url: str, prefer_render: bool) -> tuple[str, bool]:
+    """Fetch page text with two-way fallback between plain HTTP and headless
+    rendering: whichever method is preferred runs first; if it fails (blocked,
+    network error) or comes back nearly empty, the other method is tried.
+    Returns (text, was_rendered). Raises the most informative error if both fail."""
+    methods = ["plain", "render"]
+    if prefer_render and renderer_available():
+        methods = ["render", "plain"]
+    if not renderer_available():
+        methods = ["plain"]
+
+    errors: list[Exception] = []
+    for method in methods:
+        try:
+            text = fetch_page_text(url) if method == "plain" else fetch_page_text_rendered(url)
+        except Exception as exc:
+            logger.warning("%s fetch failed for %s: %s", method, url, exc)
+            errors.append(exc)
+            continue
+        if len(text.strip()) >= 200:
+            return text, method == "render"
+        errors.append(PageTextEmpty(url))
+
+    # Prefer reporting a concrete HTTP/network error over "page was empty".
+    for exc in errors:
+        if not isinstance(exc, PageTextEmpty):
+            raise exc
+    raise errors[0] if errors else PageTextEmpty(url)
+
+
 def parse_beers_with_llm(brewery_name: str, url: str, page_text: str) -> list[ParsedBeer]:
     """Extract the beer list from page text using Claude structured outputs."""
     client = anthropic.Anthropic()
@@ -330,17 +385,12 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
     for url in urls:
         try:
             page = pages.get(url)
-            # URLs known to need JS rendering skip the plain fetch entirely.
-            rendered = bool(page is not None and page.needs_render and renderer_available())
-            text = fetch_page_text_rendered(url) if rendered else fetch_page_text(url)
-
-            if len(text.strip()) < 200:
-                # Nearly-empty shell: render it before giving up.
-                if not rendered and renderer_available():
-                    text = fetch_page_text_rendered(url)
-                    rendered = True
-                if len(text.strip()) < 200:
-                    raise PageTextEmpty(url)
+            # Two-way fallback: URLs known to need JS rendering try the
+            # browser first, everything else tries plain HTTP first — and
+            # either path falls back to the other if it's blocked or empty.
+            text, rendered = fetch_best_text(
+                url, prefer_render=bool(page is not None and page.needs_render)
+            )
 
             content_hash = _content_hash(text)
             # Reuse only non-empty cached parses: a cached 0-beer result is
@@ -360,8 +410,13 @@ def scrape_brewery(db: Session, brewery: Brewery) -> ScrapeLog:
                 llm_calls += 1
                 if not beers and not rendered and renderer_available():
                     # Plain fetch parsed to nothing — likely a JS-rendered menu.
-                    # Render the page and try once more.
-                    rendered_text = fetch_page_text_rendered(url)
+                    # Render the page and try once more; a render failure here
+                    # must not discard the (valid, if empty) plain result.
+                    try:
+                        rendered_text = fetch_page_text_rendered(url)
+                    except Exception:
+                        logger.warning("Render retry failed for %s", url, exc_info=True)
+                        rendered_text = ""
                     if len(rendered_text.strip()) >= 200 and rendered_text != text:
                         rendered_beers = parse_beers_with_llm(brewery.name, url, rendered_text)
                         llm_calls += 1

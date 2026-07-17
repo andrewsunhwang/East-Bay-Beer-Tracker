@@ -346,6 +346,11 @@ def login_request(
     email = auth.normalize_email(email)
     if not auth.valid_email(email):
         return redirect("/login", error="Please enter a valid email address.")
+    if auth.code_request_rate_limited(db, email, auth.client_ip(request)):
+        return redirect(
+            "/login",
+            error="Too many sign-in codes requested — please wait 15 minutes and try again.",
+        )
     try:
         auth.request_login_code(db, email)
     except Exception:

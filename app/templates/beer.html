@@ -23,7 +23,10 @@
     {% if beer.abv is not none %}<span class="badge">{{ beer.abv }}% ABV</span>{% endif %}
     {% if beer.availability %}<span class="badge">{{ beer.availability }}</span>{% endif %}
   </div>
-  {% if beer.description %}<p>{{ beer.description }}</p>{% endif %}
+  {% if beer.description %}
+    <p class="beer-desc"><span class="desc-label">Described by {{ beer.brewery.name }} as:</span><br>
+    “{{ beer.description }}”</p>
+  {% endif %}
 
   <h2>History</h2>
   <table style="max-width: 32rem;">
