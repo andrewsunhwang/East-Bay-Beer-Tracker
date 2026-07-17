@@ -104,7 +104,9 @@ Passwordless by construction — there are no password fields anywhere.
    session table — the signature is the proof.
 
 **Admin** is not a role stored in the database: a session is admin if and only
-if its email equals `ADMIN_EMAIL` (default `andrewsunhwang@gmail.com`). The
+if its email equals the `ADMIN_EMAIL` environment variable (no default — set
+it on the host so no personal address lives in the repo; unset = admin
+features disabled). The
 admin normally signs in through the exact same email-code flow; there is no
 separate admin credential to leak. All `/admin` routes re-check this on every
 request, and the Admin nav link renders only for that session.

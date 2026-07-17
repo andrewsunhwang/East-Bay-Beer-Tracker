@@ -5,7 +5,7 @@ A website that tracks the beers currently offered by East Bay breweries.
 - **Public beer list** at `/` with filters: text search, brewery, style, ABV range, availability, and retired beers.
 - **Daily scraping + LLM parsing**: every day (and on demand from the admin panel), the app fetches each brewery's configured URL(s), strips the HTML to text, and asks Claude (`claude-sonnet-5`, structured outputs) to extract the beer list. Unchanged pages are served from a content-hash cache with no API call. Beers are upserted; beers that disappear from a page are marked "no longer listed".
 - **Passwordless email sign-in**: users enter their email and receive a 6-digit one-time code (no passwords). Signed-in users manage **alerts** at `/alerts` — keyword / brewery / style / ABV-range conditions. When a scrape finds a *new* matching beer, they get an email.
-- **Admin panel** at `/admin`, restricted to `ADMIN_EMAIL` (default `andrewsunhwang@gmail.com`) via the same email-code sign-in: add/edit/delete breweries, manage their scrape URLs, trigger scrapes, and view scrape logs.
+- **Admin panel** at `/admin`, restricted to the email set in the `ADMIN_EMAIL` env var, via the same email-code sign-in (or `ADMIN_PASSWORD`): add/edit/delete breweries, manage their scrape URLs, trigger scrapes, and view scrape logs.
 
 **Docs:** [Architecture & design](docs/ARCHITECTURE.md) · [Deployment guide](docs/DEPLOYMENT.md)
 
@@ -31,7 +31,7 @@ All via environment variables — see [.env.example](.env.example). Key ones:
 | Variable | Default | Purpose |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | — | Claude API key used by the scraper |
-| `ADMIN_EMAIL` | `andrewsunhwang@gmail.com` | The only account that sees `/admin` |
+| `ADMIN_EMAIL` | — (required for admin) | The only account that sees `/admin`; admin disabled if unset |
 | `SMTP_HOST` etc. | unset (log emails) | Outbound email for codes + alerts |
 | `BASE_URL` | `http://localhost:8000` | Used in alert-email links |
 | `SCRAPE_HOUR` | `4` | Daily scrape hour (server local time) |

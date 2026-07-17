@@ -81,6 +81,11 @@ async def daily_scrape_loop() -> None:
 async def lifespan(app: FastAPI):
     init_db()
     seed_if_empty()
+    if not config.ADMIN_EMAIL:
+        logger.warning(
+            "ADMIN_EMAIL is not set — the admin panel is disabled. "
+            "Set it in the server environment to enable admin access."
+        )
     task = asyncio.create_task(daily_scrape_loop())
     yield
     task.cancel()
@@ -400,6 +405,8 @@ def admin_login(
     db: Session = Depends(get_db),
     password: str = Form(...),
 ):
+    if not config.ADMIN_EMAIL:
+        return redirect("/login", error="ADMIN_EMAIL is not configured on this server.")
     if not auth.admin_password_enabled() or not auth.verify_admin_password(password):
         return redirect("/admin/login", error="Incorrect admin password.")
     auth.get_or_create_user(db, config.ADMIN_EMAIL)

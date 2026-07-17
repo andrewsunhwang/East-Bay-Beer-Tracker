@@ -9,7 +9,10 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", BASE_DIR / "data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 # The single admin account. Only this email sees/uses the admin panel.
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "andrewsunhwang@gmail.com").strip().lower()
+# Deliberately has no default: set it in your host's environment (e.g. a
+# Railway variable) so no personal address lives in the repo. If unset,
+# admin features are disabled.
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "").strip().lower()
 
 # Optional admin password. When set, the admin can sign in with this password
 # at /admin/login (no email code needed — useful when SMTP is unavailable).
