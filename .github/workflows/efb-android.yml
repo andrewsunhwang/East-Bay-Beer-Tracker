@@ -1,0 +1,62 @@
+name: EFB Android
+
+on:
+  push:
+    paths:
+      - 'efb-android/**'
+      - '.github/workflows/efb-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Unit tests + APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: efb-android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Core unit tests
+        run: ./gradlew --no-daemon -PcoreOnly=true :core:test
+      - name: Build APK
+        if: hashFiles('efb-android/app/build.gradle.kts') != ''
+        run: ./gradlew --no-daemon :app:assembleRelease
+      - name: Upload APK
+        if: hashFiles('efb-android/app/build.gradle.kts') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleEFB-apk
+          path: efb-android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+  live-faa-check:
+    name: Live FAA data check
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    defaults:
+      run:
+        working-directory: efb-android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Check FAA endpoints and formats
+        run: ./gradlew --no-daemon -PcoreOnly=true :core:liveCheck
+      - name: Upload samples
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-faa-samples
+          path: efb-android/core/build/live/
+          if-no-files-found: ignore
