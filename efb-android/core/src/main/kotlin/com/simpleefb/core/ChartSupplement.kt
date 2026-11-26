@@ -40,6 +40,21 @@ object ChartSupplement {
             .distinct()
             .toList()
 
+    private val AIRPORT_PAGE = Regex("""/[a-z]{2,3}_\d+_\d{2}[a-z]{3}\d{4}\.pdf$""", RegexOption.IGNORE_CASE)
+    private val NOTICES_PAGE = Regex("""/[a-z]{2,3}_[a-z0-9]+_notices_\d{2}[a-z]{3}\d{4}\.pdf$""", RegexOption.IGNORE_CASE)
+
+    /**
+     * From all the links on a search-result page, keeps the airport's own page(s) (e.g.
+     * `sw_224_29OCT2026.pdf`) followed by its notices page (`sw_OAK_notices_29OCT2026.pdf`).
+     * Front/rear matter and hot-spot booklets are dropped. Links are upgraded to https.
+     */
+    fun airportPages(links: List<String>): List<String> {
+        val https = links.map { it.replaceFirst(Regex("^http://", RegexOption.IGNORE_CASE), "https://") }
+        val pages = https.filter { AIRPORT_PAGE.containsMatchIn(it) }
+        val notices = https.filter { NOTICES_PAGE.containsMatchIn(it) }
+        return if (pages.isEmpty()) emptyList() else (pages + notices).distinct()
+    }
+
     /** File name such as `sw_268_29OCT2026.pdf` from a page URL. */
     fun fileName(url: String): String = url.substringAfterLast('/').substringBefore('?')
 

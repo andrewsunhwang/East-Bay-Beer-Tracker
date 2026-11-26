@@ -122,8 +122,8 @@ fun main() {
         for (url in ChartSupplement.searchUrls("OAK", edition)) {
             val r = safeGet(url, ua = ua) ?: continue
             val html = String(r.body)
-            val links = ChartSupplement.extractPageLinks(html, r.finalUrl)
-            println("   [$ua] $url -> ${r.code} ${r.body.size} bytes, links=$links")
+            val links = ChartSupplement.airportPages(ChartSupplement.extractPageLinks(html, r.finalUrl))
+            println("   [$ua] $url -> ${r.code} ${r.body.size} bytes, airport pages=$links")
             if (links.isEmpty()) {
                 File("build/live").mkdirs()
                 File("build/live/cs-search-${r.code}.html").writeText(html.take(200_000))
@@ -140,14 +140,31 @@ fun main() {
         }
     }
     if (!csOk) fail("could not locate a Chart Supplement page for OAK via the FAA search page")
-    // Possible locations of the d-CS XML index.
+    // d-CS XML index (the app's fallback when the search page fails).
     val d = edition.faaDate
-    for (u in listOf(
-        "https://aeronav.faa.gov/afd/${d.lowercase()}/afd_$d.xml",
-        "https://aeronav.faa.gov/afd/$d/afd_$d.xml",
-        "https://aeronav.faa.gov/afd/${d.lowercase()}/afd_${d.lowercase()}.xml",
-    )) {
-        safeGet(u, maxBytes = 4096)?.let { println("   index guess $u -> ${it.code} ${it.type}") }
+    val indexUrl = "https://aeronav.faa.gov/afd/${d.lowercase()}/afd_$d.xml"
+    val idx = safeGet(indexUrl)
+    if (idx == null || idx.code != 200) {
+        fail("d-CS index $indexUrl -> ${idx?.code}")
+    } else {
+        println("   $indexUrl -> 200, ${idx.body.size} bytes")
+        println("      head: ${String(idx.body, 0, minOf(1500, idx.body.size)).replace("\n", " ")}")
+        var n = 0
+        val wanted = HashMap<String, List<String>>()
+        try {
+            ChartSupplement.parseIndex(idx.body.inputStream(), { KXmlParser() }) { id, pdfs ->
+                n++
+                if (id in setOf("OAK", "SFO", "O88", "LVK", "JFK")) wanted[id] = pdfs
+            }
+        } catch (e: Exception) {
+            fail("d-CS index parse error: $e")
+        }
+        println("      parsed $n airports; samples: $wanted")
+        if (n < 1000) fail("d-CS index: too few airports ($n)")
+        wanted["OAK"]?.firstOrNull()?.let { pdf ->
+            val p = safeGet("https://aeronav.faa.gov/afd/${d.lowercase()}/$pdf", maxBytes = 2048)
+            println("      OAK via index -> ${p?.code} pdf=${p != null && p.body.size > 4 && String(p.body, 0, 4) == "%PDF"}")
+        }
     }
 
     // ---------------------------------------------------------------- APRA

@@ -110,6 +110,29 @@ class TppAndSupplementTest {
     }
 
     @Test
+    fun keepsOnlyAirportPagesAndNotices() {
+        // Links as returned by the live FAA search page for OAK (Nov 2026).
+        val links = listOf(
+            "http://aeronav.faa.gov/afd/29oct2026/SW_rear_29oct2026.pdf",
+            "http://aeronav.faa.gov/afd/29oct2026/sw_224_29OCT2026.pdf",
+            "http://aeronav.faa.gov/afd/29oct2026/sw_OAK_notices_29OCT2026.pdf",
+            "http://aeronav.faa.gov/afd/29oct2026/SW_front_29oct2026.pdf",
+            "http://aeronav.faa.gov/afd/29oct2026/ak_front_29oct2026.pdf",
+            "http://aeronav.faa.gov/afd/29oct2026/pac_front_29oct2026.pdf",
+            "http://aeronav.faa.gov/afd/29oct2026/SW_hotspot.pdf",
+            "http://aeronav.faa.gov/afd/29oct2026/all_hotspot.pdf",
+        )
+        assertEquals(
+            listOf(
+                "https://aeronav.faa.gov/afd/29oct2026/sw_224_29OCT2026.pdf",
+                "https://aeronav.faa.gov/afd/29oct2026/sw_OAK_notices_29OCT2026.pdf",
+            ),
+            ChartSupplement.airportPages(links),
+        )
+        assertEquals(emptyList<String>(), ChartSupplement.airportPages(links.filter { "224" !in it }))
+    }
+
+    @Test
     fun parsesSupplementIndex() {
         val idx = """<airports><location state="CALIFORNIA">
             <airport><aptname>METRO OAKLAND INTL</aptname><aptcity>OAKLAND</aptcity><aptid>OAK</aptid>
