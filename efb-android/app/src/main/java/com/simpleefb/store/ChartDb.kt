@@ -22,6 +22,11 @@ data class SavedRegion(
 /** SQLite index of airports/charts (from the d-TPP metafile), favorites, CS page links, regions. */
 class ChartDb(context: Context) : SQLiteOpenHelper(context, "charts.sqlite", null, 1) {
 
+    init {
+        // WAL lets the UI keep reading while a new cycle is being imported in the background.
+        setWriteAheadLoggingEnabled(true)
+    }
+
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
             """CREATE TABLE airports (faa_id TEXT PRIMARY KEY, icao_id TEXT, name TEXT, city TEXT,
@@ -50,7 +55,7 @@ class ChartDb(context: Context) : SQLiteOpenHelper(context, "charts.sqlite", nul
     /** Replaces everything stored for [cycle] with the parsed airports, inside one transaction. */
     fun importCycle(cycle: String, block: ((TppAirportCharts) -> Unit) -> Pair<String, String>) {
         val db = writableDatabase
-        db.beginTransaction()
+        db.beginTransactionNonExclusive()
         try {
             db.delete("charts", "cycle = ?", arrayOf(cycle))
             val apt = db.compileStatement(

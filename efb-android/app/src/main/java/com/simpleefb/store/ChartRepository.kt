@@ -125,16 +125,17 @@ class ChartRepository(private val context: Context, val db: ChartDb) {
             val id = csIdent(ident)
             db.csPages(edition.ident, id)?.let { if (it.isNotEmpty()) return@withContext it }
             var lastError: Exception? = null
-            val found = try {
+            var found: List<String> = try {
                 supplementFromSearch(id, edition)
             } catch (e: Exception) {
                 lastError = e
                 emptyList()
-            }.ifEmpty {
-                try {
+            }
+            if (found.isEmpty()) {
+                found = try {
                     supplementFromIndex(id, edition)
                 } catch (e: Exception) {
-                    lastError = lastError ?: e
+                    if (lastError == null) lastError = e
                     emptyList()
                 }
             }

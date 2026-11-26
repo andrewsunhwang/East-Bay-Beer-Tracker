@@ -151,8 +151,8 @@ fun MapScreen(graph: AppGraph) {
             mapView.overlays.add(0, overlay)
             tacOverlay = overlay
         }
-        mapView.minZoomLevel = base.minZoom.toDouble()
-        mapView.maxZoomLevel = layer.maxZoom.toDouble()
+        mapView.setMinZoomLevel(base.minZoom.toDouble())
+        mapView.setMaxZoomLevel(layer.maxZoom.toDouble())
         val z = mapView.zoomLevelDouble
         when {
             layer == ChartLayer.TAC && z < ChartLayer.TAC.minZoom -> mapView.controller.setZoom(ChartLayer.TAC.minZoom.toDouble())
